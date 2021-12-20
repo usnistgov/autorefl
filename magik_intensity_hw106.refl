@@ -1,0 +1,55 @@
+# "template_data":{"template":{"wires":[{"source":[0,"output"],"target":[1,"data"]},{"source":[1,"output"],"target":[2,"data"]},{"source":[2,"output"],"target":[11,"data"]},{"source":[3,"output"],"target":[4,"data"]},{"source":[4,"output"],"target":[8,"data"]},{"source":[8,"output"],"target":[11,"backp"]},{"source":[5,"output"],"target":[6,"data"]},{"source":[6,"output"],"target":[7,"data"]},{"source":[7,"output"],"target":[11,"backm"]},{"source":[9,"output"],"target":[10,"data"]},{"source":[10,"output"],"target":[12,"data"]},{"source":[12,"output"],"target":[13,"data"]},{"source":[13,"output"],"target":[14,"base"]},{"source":[11,"output"],"target":[14,"data"]}],"modules":[{"config":{"intent":"specular","filelist":[{"path":"ncnrdata/magik/202001/24294/data/hw10624565.nxz.cgd","source":"ncnr","mtime":1579894725,"entries":["unpolarized"]},{"path":"ncnrdata/magik/202001/24294/data/hw10624576.nxz.cgd","source":"ncnr","mtime":1579905872,"entries":["unpolarized"]}],"detector_correction":true,"monitor_correction":true},"module":"ncnr.refl.super_load","title":"load spec","x":30,"y":10},{"module":"ncnr.refl.mask_points","y":10,"x":170,"title":"mask"},{"module":"ncnr.refl.join","y":10,"x":310,"title":"join"},{"module":"ncnr.refl.super_load","title":"load bg+","x":30,"y":50,"config":{"filelist":[{"path":"ncnrdata/magik/202001/24294/data/hw10624567.nxz.cgd","source":"ncnr","mtime":1579897806,"entries":["unpolarized"]},{"path":"ncnrdata/magik/202001/24294/data/hw10624578.nxz.cgd","source":"ncnr","mtime":1579908950,"entries":["unpolarized"]}],"detector_correction":true,"monitor_correction":true,"Qz_basis":"sample"}},{"module":"ncnr.refl.mask_points","y":50,"x":170,"title":"mask"},{"module":"ncnr.refl.super_load","title":"load bg-","x":30,"y":90,"config":{"filelist":[{"path":"ncnrdata/magik/202001/24294/data/hw10624566.nxz.cgd","source":"ncnr","mtime":1579896260,"entries":["unpolarized"]},{"path":"ncnrdata/magik/202001/24294/data/hw10624577.nxz.cgd","source":"ncnr","mtime":1579907403,"entries":["unpolarized"]}],"detector_correction":true,"monitor_correction":true,"Qz_basis":"sample"}},{"module":"ncnr.refl.mask_points","y":90,"x":170,"title":"mask"},{"module":"ncnr.refl.join","y":90,"x":310,"title":"join"},{"module":"ncnr.refl.join","y":50,"x":310,"title":"join"},{"config":{"intent":"intensity","filelist":[{"path":"ncnrdata/magik/202001/24294/data/hw10624571.nxz.cgd","source":"ncnr","mtime":1579898836,"entries":["unpolarized"]},{"path":"ncnrdata/magik/202001/24294/data/hw10624572.nxz.cgd","source":"ncnr","mtime":1579899522,"entries":["unpolarized"]},{"path":"ncnrdata/magik/202001/24294/data/hw10624561.nxz.cgd","source":"ncnr","mtime":1579888454,"entries":["unpolarized"]}],"detector_correction":true,"monitor_correction":true,"base":"time"},"module":"ncnr.refl.super_load","title":"load slit","x":30,"y":130},{"module":"ncnr.refl.mask_points","y":130,"x":170,"title":"mask"},{"module":"ncnr.refl.subtract_background","y":10,"x":455,"title":"sub bg"},{"module":"ncnr.refl.rescale","y":130,"x":310,"title":"rescale","config":{"scale":[17.164651543004876,381.1366799296779,1]}},{"module":"ncnr.refl.join","y":130,"x":455,"title":"join"},{"module":"ncnr.refl.divide_intensity","y":55,"x":600,"title":"divide"}]},"node":13,"terminal":"output","datasources":[{"url":"https://www.ncnr.nist.gov/pub/","name":"ncnr","start_path":"ncnrdata"}],"server_git_hash":"37403ccf75017ae5b53e2ebc8ae550d93116b567","server_mtime":"2020-02-13T14:39:47.000Z","instrument_id":"ncnr.refl"}
+# "name": "hw10624561"
+# "entry": "unpolarized"
+# "polarization": ""
+# "wavelength": 5.0
+# "wavelength_resolution": 0.03500000014901161
+# "columns": ["slit 1 opening", "Intensity", "uncertainty", "resolution"]
+# "units": ["mm", "counts per second", "counts per second", "mm"]
+1.0729999840e-01 8.1689050502e+02 1.4076916950e+01 8.0476144058e-05
+1.3519999385e-01 1.3179401170e+03 1.8131175488e+01 1.0086592411e-04
+1.6189999878e-01 1.9028864553e+03 2.1958974010e+01 1.2088227256e-04
+1.8850000203e-01 2.6090596617e+03 2.6131819829e+01 1.4097329917e-04
+2.1580000222e-01 3.3680127682e+03 3.0164882724e+01 1.6140042851e-04
+2.4189999700e-01 4.2430149478e+03 3.4441204185e+01 1.8111800308e-04
+2.6919999719e-01 5.2872520044e+03 3.9103129327e+01 2.0147045427e-04
+2.9580000043e-01 6.4206712646e+03 4.4351767472e+01 2.2156147066e-04
+3.2429999113e-01 7.7073281618e+03 4.9540972614e+01 2.4224999395e-04
+3.5159999132e-01 9.0397627630e+03 5.4641331045e+01 2.6237836984e-04
+3.7829998136e-01 1.0502003700e+04 2.2962601654e+01 2.8250675225e-04
+4.3160000443e-01 1.3618965804e+04 7.8978250669e+01 3.2272613801e-04
+4.8500001431e-01 1.7310487178e+04 9.9739185198e+01 3.6275883491e-04
+5.4019999504e-01 2.1563333699e+04 1.2347446266e+02 4.0368773089e-04
+5.9469997883e-01 2.5917452327e+04 1.4937764161e+02 4.4413125975e-04
+6.4810001850e-01 3.0980429336e+04 1.7873733517e+02 4.8438801153e-04
+7.0200002193e-01 3.5979253453e+04 2.0664897552e+02 5.2460734253e-04
+7.5720000267e-01 4.1972452125e+04 2.4272748539e+02 5.6542430299e-04
+8.1110000610e-01 4.7970861480e+04 2.7220547788e+02 6.0575569207e-04
+8.6449998617e-01 5.4596082160e+04 3.2236561439e+02 6.4590038577e-04
+9.1839998960e-01 6.2590535007e+04 3.6999817008e+02 6.8645593185e-04
+9.7359997034e-01 6.9048569383e+04 3.8996544302e+02 7.2704865360e-04
+1.0269000530e+00 7.7229302316e+04 4.4625868172e+02 7.6738024694e-04
+1.0808999538e+00 8.5473517659e+04 5.0952427776e+02 8.0763691701e-04
+1.1354999542e+00 9.4252351318e+04 5.4027716150e+02 8.4834173769e-04
+1.1900000572e+00 1.0336361377e+05 6.2566403182e+02 8.8871058840e-04
+1.2439999580e+00 1.1295586788e+05 6.5845319126e+02 9.2926613448e-04
+1.2972999811e+00 1.2391839096e+05 7.0262898872e+02 9.6926143104e-04
+1.3518999815e+00 1.3401470968e+05 8.2506542809e+02 1.0099662517e-03
+1.4070999622e+00 1.4522486956e+05 8.7484305678e+02 1.0505965577e-03
+1.4603999853e+00 1.5746490668e+05 9.1197155512e+02 1.0908905668e-03
+1.5131000280e+00 1.6961439085e+05 1.1319469466e+03 1.1306618289e-03
+1.5688999891e+00 1.8218459914e+05 1.1864093225e+03 1.1718148002e-03
+1.6234999895e+00 1.9524397801e+05 4.6083457396e+02 1.2122955864e-03
+1.7574000359e+00 2.2852647653e+05 1.3129919167e+03 1.3129748866e-03
+1.8926000595e+00 2.6900229013e+05 1.5462675119e+03 1.4139155604e-03
+2.0290999413e+00 3.0749587155e+05 1.7683404199e+03 1.5153417238e-03
+2.1635999680e+00 3.4764610701e+05 1.9996732262e+03 1.6162449768e-03
+2.2987999916e+00 3.9439394853e+05 2.2797506784e+03 1.7172601653e-03
+2.4351999760e+00 4.3811493112e+05 2.5041420457e+03 1.8184995516e-03
+2.5697999001e+00 4.9477702610e+05 2.8438373259e+03 1.9194028046e-03
+2.7049999237e+00 5.4500963373e+05 3.1334782013e+03 2.0205299286e-03
+2.8408000469e+00 5.9346778588e+05 3.4509416363e+03 2.1216201221e-03
+2.9741001129e+00 6.5721172875e+05 3.7504724199e+03 2.2219632072e-03
+3.1112000942e+00 7.2165356534e+05 4.2006896575e+03 2.3238000188e-03
+3.2469999790e+00 7.8654211367e+05 4.5477292630e+03 2.4248900488e-03
+3.3803000450e+00 8.4825849798e+05 4.9021921650e+03 2.5252332974e-03
