@@ -85,8 +85,8 @@ calcprobe.probe.background.value = bkg
 
 #%%
 def run_cycle(fitness, measQ, newQs, data, use_entropy=True, restart_pop=None, outfid=None):
-
-    mT, mdT, mL, mdL, mR, mdR, mQ, mdQ = compile_data(measQ, *data)
+    
+    mT, mdT, mL, mdL, mR, mdR, mQ, mdQ = compile_data_N(measQ, *data)
 
     fitness.probe._set_TLR(mT, mdT, mL, mdL, mR, mdR, dQ=None)
     fitness.probe.oversample(oversampling)
@@ -191,7 +191,7 @@ for kk in range(nrepeats):
     newproblem = FitProblem(newmodel)
     initpts = generate(newproblem, init='lhs', pop=fit_options['pop'], use_point=False)
     iqprof, iqbkg = calc_qprofiles(newproblem, initpts, newQs)
-    data = create_init_data(newQs, iqprof, dRoR=10.0)
+    data = create_init_data_N(newQs, iqprof, dRoR=10.0)
 
     while t[-1] < maxtime:
         starttime = time.time()
@@ -207,7 +207,7 @@ for kk in range(nrepeats):
         if k > 0:
             newvars = gen_new_variables(newQs)
             calcR = calc_expected_R(calcprobe, *newvars, oversampling=oversampling)
-            data = append_data(newQs, calcR, meas_time, bkg, *data)
+            data = append_data_N(newQs, calcR, meas_time, bkg, *data)
 
         newQs, meas_time, restart_pop, best_logp, final_chisq, d, newfoms, qprof, qbkg, fom = run_cycle(newmodel, measQ, newQs, data, use_entropy=True, restart_pop=restart_pop, outfid=None)
 
@@ -266,7 +266,7 @@ for kk in range(nrepeats):
     data = np.array(data)
     cycletime = np.array([(i, val) for i, m in enumerate(meastimes) for val in m])
 #    print(data.shape, cycletime.shape, data[0,:][None,:].shape, data[:,0][:,None].shape)
-    np.savetxt(fn + fsuffix + '-data%i.txt' % kk, np.hstack((a2q(data[0,:], data[2,:])[:,None], cycletime, data.T)), header='Q, cycle, meas_time, T, dT, L, dL, R, dR')
+    np.savetxt(fn + fsuffix + '-data%i.txt' % kk, np.hstack((a2q(data[0,:], data[2,:])[:,None], cycletime, data.T)), header='Q, cycle, meas_time, T, dT, L, dL, Nspecular, Nbackground, Nincident')
     np.savetxt(fn + fsuffix + '-foms%i.txt' % (kk), np.vstack((measQ, np.array(foms))).T, header='Q, figure_of_merit')
 
 #np.savetxt(fn + fsuffix + '-timevars_all.txt', np.vstack((t, Hs, Hs_marg, best_logps, median_logps)), header='t, Hs, Hs_marg, best_logps, median_logps')
@@ -283,7 +283,7 @@ newQs = models[modelnum].fitness.probe.Q
 measQ2 = newQs
 meastimeweight = newQs**2
 meastimeweight /= np.sum(meastimeweight)
-data2 = ([], [], [], [], [], [])
+data2 = ([], [], [], [], [], [], [])
 restart_pop2=None
 
 fid = open(fn + fsuffix+ '_auto_report_noselect.txt', 'w')
@@ -303,7 +303,7 @@ for kk in range(nrepeats):
     all_meastimes2 = list()
 
     # generate data
-    data2 = ([], [], [], [], [], [])
+    data2 = ([], [], [], [], [], [], [])
 
     # reset model
     newmodel = copy.deepcopy(models[modelnum].fitness)
@@ -320,7 +320,7 @@ for kk in range(nrepeats):
 
         newvars = gen_new_variables(newQs)
         calcR = calc_expected_R(calcprobe, *newvars, oversampling=oversampling)
-        data2 = append_data(newQs, calcR, meas_time, bkg, *data2)
+        data2 = append_data_N(newQs, calcR, meas_time, bkg, *data2)
 
         _, _, restart_pop2, best_logp, final_chisq, d, _, _, _, _ = run_cycle(newmodel, measQ, newQs, data2, use_entropy=False, restart_pop=restart_pop2, outfid=None)
 
@@ -347,7 +347,7 @@ for kk in range(nrepeats):
     data2 = np.array(data2)
     cycletime = np.array([(i, val) for i, m in enumerate(all_meastimes2) for val in m])
 #    print(data2.shape, cycletime.shape, data2[0,:][None,:].shape, data2[:,0][:,None].shape)
-    np.savetxt(fn + fsuffix + '-data%i_noselect.txt' % kk, np.hstack((a2q(data2[0,:], data2[2,:])[:,None], cycletime, data2.T)), header='Q, cycle, meas_time, T, dT, L, dL, R, dR')
+    np.savetxt(fn + fsuffix + '-data%i_noselect.txt' % kk, np.hstack((a2q(data2[0,:], data2[2,:])[:,None], cycletime, data2.T)), header='Q, cycle, meas_time, T, dT, L, dL, Nspecular, Nbackground, Nincident')
     np.savetxt(fn + fsuffix + '-timevars%i_noselect.txt' % kk, np.vstack((t[1:], Hs2, Hs2_marg, Hs0-np.array(Hs2), Hs0_marg - np.array(Hs2_marg), best_logps2, median_logps2, np.array(varXs2).T)).T, header='t, Hs, Hs_marg, dHs, dHs_marg, best_logps, median_logps, nxparameter_variances')
 
 #np.savetxt(fn + fsuffix + '-timevars_all_noselect.txt', np.vstack((all_t2, Hs2, Hs2_marg, best_logps2, median_logps2)), header='t, Hs, Hs_marg, best_logps, median_logps')

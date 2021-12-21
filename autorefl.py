@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 from matplotlib import cm, colors
 from bumps.mapper import MPMapper, can_pickle, SerialMapper
 from sklearn.linear_model import LinearRegression
+from scipy.stats import poisson
 
 d_intens = np.loadtxt('magik_intensity_hw106.refl')
 
@@ -44,6 +45,15 @@ def sim_data(R, incident_neutrons, addnoise=True, background=0):
 
     return (R-bR)/incident_neutrons, np.sqrt(dR**2 + dbR**2)/incident_neutrons
 
+def sim_data_N(R, incident_neutrons, addnoise=True, background=0):
+
+    _bR = np.ones_like(R)*background*incident_neutrons
+    _R = (R+background)*incident_neutrons
+    N = poisson.rvs(_R)
+    bN = poisson.rvs(_bR)
+
+    return N, bN, incident_neutrons
+
 def gen_new_variables(newQ):
     T = q2a(newQ, wv)
     dT = np.polyval(pres, newQ)
@@ -74,6 +84,33 @@ def append_data(newQ, Rth, meas_time, bkgd, T, dT, L, dL, R, dR):
     
     return T, dT, L, dL, R, dR
 
+def append_data_N(newQ, Rth, meas_time, bkgd, T, dT, L, dL, N, Nbkg, Ninc):
+    news1 = np.polyval(ps1, newQ)
+    incident_neutrons = np.polyval(p_intens, news1) * meas_time
+    newN, newNbkg, newNinc = sim_data_N(Rth, incident_neutrons, background=bkgd)
+    T = np.append(T, q2a(newQ, wv))
+    dT = np.append(dT, np.polyval(pres, newQ))
+    L = np.append(L, np.ones_like(newQ)*wv)
+    dL = np.append(dL, np.ones_like(newQ)*dwv)
+    N = np.append(N, newN)
+    Nbkg = np.append(Nbkg, newNbkg)
+    Ninc = np.append(Ninc, newNinc)
+    
+    return T, dT, L, dL, N, Nbkg, Ninc
+
+def create_init_data_N(newQ, qprof, dRoR):
+    newR, newdR = np.mean(qprof, axis=0), dRoR * np.std(qprof, axis=0)
+    targetN = (newR / newdR) ** 2
+    target_incident_neutrons = targetN / newR
+    N, Nbkg, Ninc = sim_data_N(newR, target_incident_neutrons, background=0)
+    #print(newR, target_incident_neutrons, N, Nbkg, Ninc)
+    T = q2a(newQ, wv)
+    dT = np.polyval(pres, newQ)
+    L = np.ones_like(newQ)*wv
+    dL = np.ones_like(newQ)*dwv
+    
+    return T, dT, L, dL, N, Nbkg, Ninc
+
 def create_init_data(newQ, qprof, dRoR):
     newR, newdR = np.mean(qprof, axis=0), dRoR * np.std(qprof, axis=0)
     T = q2a(newQ, wv)
@@ -101,6 +138,32 @@ def compile_data(Qbasis, T, dT, L, dL, R, dR):
     _Q = TL2Q(_T, _L)
     _dT = np.polyval(pres, _Q)
     _dQ = dTdL2dQ(_T, _dT, _L, _dL)    
+
+    return _T, _dT, _L, _dL, _R, _dR, _Q, _dQ
+
+
+def compile_data_N(Qbasis, T, dT, L, dL, Ntot, Nbkg, Ninc):
+    _Q = TL2Q(T=T, L=L)
+    # make sure end bins contain the first and last Q values (always should)
+    Qbasis[0] = min(min(Qbasis), min(_Q))
+    Qbasis[-1] = max(max(Qbasis), max(_Q))
+    _N, _bins = np.histogram(_Q, Qbasis, weights=Ntot)
+    _Nbkg = np.histogram(_Q, Qbasis, weights=Nbkg)[0]
+    _norm = np.histogram(_Q, Qbasis, weights=Ninc)[0]
+    nz = _norm.nonzero()
+    _R = (_N[nz]-_Nbkg[nz])/_norm[nz]
+    _Nmin = np.max(np.vstack(((_N + _Nbkg), np.ones_like(_N))), axis=0)
+    _dR = np.sqrt(_Nmin)[nz] / _norm[nz]
+    #print(_Q.shape, _dR.shape)
+    _normR = np.histogram(_Q, Qbasis, weights=1./dT**2)[0][nz]
+    _T = np.histogram(_Q, Qbasis, weights=T/dT**2)[0][nz]/_normR
+    _L = np.ones_like(_T) * wv
+    _dL = np.ones_like(_T) * dwv
+    _Q = TL2Q(_T, _L)
+    _dT = np.polyval(pres, _Q)
+    _dQ = dTdL2dQ(_T, _dT, _L, _dL)    
+
+    #print(_R, _dR, _N[nz], _Nbkg[nz], _norm[nz])
 
     return _T, _dT, _L, _dL, _R, _dR, _Q, _dQ
 
@@ -184,7 +247,7 @@ def plot_qprofiles(Qth, qprofs, logps, data=None, ax=None, exclude_from=0):
         fig = ax.figure.canvas
 
     if data is not None:
-        _, _, _, _, Rs, dRs, Qs, _ = compile_data(Qth, *data)
+        _, _, _, _, Rs, dRs, Qs, _ = compile_data_N(Qth, *data)
         ax.errorbar(Qs[exclude_from:], (Rs*Qs**4)[exclude_from:], (dRs*Qs**4)[exclude_from:], fmt='o', color='k', markersize=10, alpha=0.7, capsize=8, linewidth=3, zorder=100)
 
     cmin, cmax = np.median(logps) + 2 * np.std(logps) * np.array([-1,1])
