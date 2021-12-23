@@ -175,10 +175,11 @@ if combine_even:
     plotzip = zip([av_dHs_even, av_dHs_marg_even], [1, 0], [evencolor] * 2, ['av_dHs_even', 'av_dHs_marg_even'])
     plotter(ts, plotzip, ax)
 
-    av_parvars_even = np.array(av_parvars_even)
-    #print(av_parvars_even[:,0,:].shape)
-    plotzip = zip([np.sqrt(av_parvars_even[:,i,:]) for i in range(npars)], list(range(npars)), [evencolor] * npars, ['par%i' % i for i in range(npars)])
-    plotter(ts, plotzip, axvars.flatten(), fit=False)
+    if len(av_parvars_even):
+        av_parvars_even = np.array(av_parvars_even)
+        #print(av_parvars_even[:,0,:].shape)
+        plotzip = zip([np.sqrt(av_parvars_even[:,i,:]) for i in range(npars)], list(range(npars)), [evencolor] * npars, ['par%i' % i for i in range(npars)])
+        plotter(ts, plotzip, axvars.flatten(), fit=False)
 
 for axvar in axvars.flatten()[:npars]:
     axvar.set_yscale('log')
