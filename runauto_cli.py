@@ -42,7 +42,7 @@ npoints = 1 if args.npoints is None else args.npoints
 maxtime = 21.6e3 if args.maxtime is None else args.maxtime
 nrepeats = 10 if args.nrepeats is None else args.nrepeats
 fit_options['burn'] = 1000 if args.burn is None else args.burn
-fit_options['steps'] = 500 if args.burn is None else args.steps
+fit_options['steps'] = 500 if args.steps is None else args.steps
 modelnum = 0 if args.model is None else args.model
 
 fsuffix = '_alpha%0.2f_npoints%i_repeats%i_m%i' % (alpha, npoints, nrepeats, modelnum)
