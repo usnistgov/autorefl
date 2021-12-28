@@ -109,8 +109,8 @@ for path, cs in zip(paths, colors):
         if not iseven or not combine_even:
             ax[0].semilogx(t, -dHs_marg, 'o', label=lbl, color=color, alpha=0.4)
             ax[1].semilogx(t, -dHs, 'o', label=lbl, color=color, alpha=0.4)
-            for i, axvar in enumerate(axvars.flatten()[:npars]):
-                axvar.loglog(t, np.sqrt(parvars[:,i]), 'o', color=color, alpha=0.4)
+#            for i, axvar in enumerate(axvars.flatten()[:npars]):
+#                axvar.loglog(t, np.sqrt(parvars[:,i]), 'o', color=color, alpha=0.4)
 
 
     ts = np.array([t for ts in all_ts for t in ts])
@@ -177,7 +177,7 @@ if combine_even:
 
     if len(av_parvars_even):
         av_parvars_even = np.array(av_parvars_even)
-        #print(av_parvars_even[:,0,:].shape)
+        #print(av_parvars_even.shape)
         plotzip = zip([np.sqrt(av_parvars_even[:,i,:]) for i in range(npars)], list(range(npars)), [evencolor] * npars, ['par%i' % i for i in range(npars)])
         plotter(ts, plotzip, axvars.flatten(), fit=False)
 
