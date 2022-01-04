@@ -310,13 +310,13 @@ def calc_foms(problem, drawpoints, Qth, qprofs, qbkgs, eta=0.5, select_pars=None
 
     # alternative approach
     models = [problem] if hasattr(problem, 'fitness') else list(problem.models)
-    foms = np.empty((len(models), len(Qth)))
-    meas_times = np.empty_like(foms)
-    for m, qprof, qbkg, fom, meas_time, ax in zip(models, qprofs, qbkgs, foms, meas_times, axs):
-
+    foms = list()
+    meas_times = list()
+    for m, qprof, qbkg, ax in zip(models, qprofs, qbkgs, axs):
         # define signal to background. For now, this is just a scaling factor on the effective rate
         sbr = (qprof - qbkg[:,None]) / qbkg[:,None]
         refl_rate = incident_neutrons * np.mean((qprof - qbkg[:,None])/(1+2/sbr), axis=0)
+        refl_rate = np.maximum(refl_rate, np.zeros_like(refl_rate))
 
         # q-dependent noise. Use the minimum of the actual spread in Q and the expected spread from the nearest points.
         # TODO: Is this really the right thing to do? Should probably just be the actual spread; the problem is that if
@@ -347,8 +347,11 @@ def calc_foms(problem, drawpoints, Qth, qprofs, qbkgs, eta=0.5, select_pars=None
     #    fom2 = 0.5 * np.sum(np.abs(reg_marg.coef_)**2*totalrate[:, None]/varX, axis=1)
 
         fom = df2s_marg/df2s*totalrate
+        plt.plot(fom)
+        foms.append(fom)
 
         meas_time = (1-eta) / (eta**2 * refl_rate * (minstd/np.mean(qprof, axis=0))**2)
+        meas_times.append(meas_time)
 
         if ax is not None:
             ax.semilogy(Qth, fom)
@@ -360,36 +363,40 @@ def select_new_points(Qth, foms, meas_times, npoints=1, switch_penalty=None):
     # and range between 1 (no penalty) and infinity (infinity for models that you can't go backwards to, for example, due to irreversible experimental
     # conditions)
 
-    nmodels = foms.shape[0]
+    nmodels = len(foms)
 
     if switch_penalty is None:
         switch_penalty = np.ones((nmodels,1))
 
-    scaled_foms = foms / switch_penalty
+    maxQs = []
+    maxidxs = []
+    maxfoms = []
 
-    maxQs = [[]] * nmodels
-    maxidxs = [[]] * nmodels
-    maxfoms = [[]] * nmodels
-    print(foms.shape, scaled_foms.shape)
-    for fom, maxQ, maxidx, maxfom in zip(scaled_foms, maxQs, maxidxs, maxfoms):
+    for fom, pen in zip(foms, switch_penalty):
+        scaled_fom = fom / pen
         # find maximum positions
         # a. calculate whether gradient is > 0
-        dfom = np.sign(np.diff(np.append(np.insert(fom, 0, 0),0))) < 0
+        dfom = np.sign(np.diff(np.append(np.insert(scaled_fom, 0, 0),0))) < 0
         # b. find zero crossings
         xings = np.diff(dfom.astype(float))
         maxidx = np.where(xings>0)[0]
-        maxfoms.append(fom[maxidx])
+        maxfoms.append(scaled_fom[maxidx])
         maxQs.append(Qth[maxidx])
         maxidxs.append(maxidx)
+        #plt.semilogy(Qth, scaled_fom)
+        #plt.plot(Qth[maxidx], scaled_fom[maxidx], 'o')
 
+    #print(maxidxs, maxfoms, maxQs)
 
-    maxidxs_m = [[fom, m, idx] for m, (idxs, foms) in enumerate(zip(maxidxs, maxfoms)) for idx, fom in (idxs, foms)]
+    maxidxs_m = [[fom, m, idx] for m, (idxs, mfoms) in enumerate(zip(maxidxs, maxfoms)) for idx, fom in zip(idxs, mfoms)]
+    #print(maxidxs_m)
     # select top npoints (if there are enough of them)
     top_n = sorted(maxidxs_m, reverse=True)[:min(npoints, len(maxidxs_m))]
+    #print(top_n)
 
-    newQs = [[]] * nmodels
-    new_meastimes = [[]] * nmodels
-    new_foms = [[]] * nmodels
+    newQs = []
+    new_meastimes = []
+    new_foms = []
     for i in range(nmodels):
         newQs.append([Qth[idx] for _, j, idx in top_n if i==j])
         new_meastimes.append([meas_times[i][idx] for _, j, idx in top_n if i==j])

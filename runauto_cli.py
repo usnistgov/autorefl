@@ -182,12 +182,12 @@ for kk in range(nrepeats):
     t=[0]
     Hs = list()
     Hs_marg = list()
-    meastimes = [[]] * nmodels 
+    meastimes = [[] for _ in nmodels]
     best_logps = list()
     median_logps = list()
-    iter_foms = list()
+    iter_foms = [[] for _ in nmodels]
     varXs = list()
-    last_foms = [None] * nmodels
+    last_foms = [None for _ in  nmodels]
     restart_pop=None
 
     frames = list()        
@@ -230,7 +230,8 @@ for kk in range(nrepeats):
         Hs_marg.append(calc_entropy(d.points / par_scale, select_pars=sel))
         best_logps.append(best_logp)
         median_logps.append(np.median(d.logp))
-        iter_foms.append(foms)
+        for iter_fom, fom in zip(iter_foms, foms):
+            iter_fom.append(fom)
         varXs.append(np.std(d.points, axis=0)**2)
         fid.write('final chisq: %s\n' % final_chisq)
         fid.write('entropy: %f\nmarginalized entropy: %f\nbest_logp: %f\nmedian_logp: %f\n' % (Hs[-1], Hs_marg[-1], best_logps[-1], median_logps[-1]))
@@ -240,10 +241,12 @@ for kk in range(nrepeats):
 
         if movieyn:
             axtops, axbots = fig.subplots(2, nmodels, sharex=True, sharey='row', squeeze=False, gridspec_kw={'hspace': 0})
+            total_meastime = 0.0
             for newQ, meas_time, idata, qprof, cur_fom, last_fom, newfom, axtop, axbot in zip(newQs, meastimes, data, qprofs, foms, last_foms, newfoms, axtops, axbots):
                 plotdata = tuple([v[len(meas_time[0]):] for v in idata]) if k > 0 else None
                 plot_qprofiles(measQ, qprof, d.logp, data=plotdata, ax=axtop)
                 axtop.set_title('t = %0.0f s' % np.sum(meas_time), fontsize='larger')
+                total_meastime += np.sum(meas_time)
                 if last_fom is not None:
                     axbot.semilogy(measQ, last_fom, linewidth=2, alpha=0.4, color='C0')
                 last_fom = cur_fom
@@ -251,7 +254,7 @@ for kk in range(nrepeats):
                 axbot.plot(newQ, newfom, 'o', alpha=0.5, markersize=12, color='C1')
                 axbot.set_xlabel(axtop.get_xlabel())
                 axbot.set_ylabel('figure of merit')
-            fig.suptitle('t = %0.0f s' % np.sum(meastimes), fontweight='bold', fontsize='larger')
+            fig.suptitle('t = %0.0f s' % total_meastime, fontweight='bold', fontsize='larger')
             fig.tight_layout(rect=(0.05, 0.05, 0.95, 0.95))
             fig.canvas.draw()
             image = np.frombuffer(fig.canvas.tostring_rgb(), dtype='uint8')
@@ -277,12 +280,12 @@ for kk in range(nrepeats):
     fid.flush()
 
     np.savetxt(fn + fsuffix + '-timevars%i.txt' % kk, np.vstack((t, Hs, Hs_marg, Hs0-np.array(Hs), Hs0_marg - np.array(Hs_marg), best_logps, median_logps, np.array(varXs).T)).T, header='t, Hs, Hs_marg, dHs, dHs_marg, best_logps, median_logps, nxparameter_variances')
-    for mnum, (idata, meas_time, foms) in enumerate(zip(data, meastimes, iter_foms)):
+    for mnum, (idata, meas_time, fom) in enumerate(zip(data, meastimes, iter_foms)):
         idata = np.array(idata)
         cycletime = np.array([(i, val) for i, m in enumerate(meas_time) for val in m])
     #    print(data.shape, cycletime.shape, data[0,:][None,:].shape, data[:,0][:,None].shape)
         np.savetxt(fn + fsuffix + '-data%i_m%i.txt' % (kk, mnum), np.hstack((a2q(data[0,:], data[2,:])[:,None], cycletime, data.T)), header='Q, cycle, meas_time, T, dT, L, dL, Nspecular, Nbackground, Nincident')
-        np.savetxt(fn + fsuffix + '-foms%i_m%i.txt' % (kk, mnum), np.vstack((measQ, np.array(foms))).T, header='Q, figure_of_merit')
+        np.savetxt(fn + fsuffix + '-foms%i_m%i.txt' % (kk, mnum), np.vstack((measQ, np.array(fom))).T, header='Q, figure_of_merit')
 
 #np.savetxt(fn + fsuffix + '-timevars_all.txt', np.vstack((t, Hs, Hs_marg, best_logps, median_logps)), header='t, Hs, Hs_marg, best_logps, median_logps')
 fid.close()
