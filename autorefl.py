@@ -98,18 +98,22 @@ def append_data_N(newQ, Rth, meas_time, bkgd, T, dT, L, dL, N, Nbkg, Ninc):
     
     return T, dT, L, dL, N, Nbkg, Ninc
 
-def create_init_data_N(newQ, qprof, dRoR):
-    newR, newdR = np.mean(qprof, axis=0), dRoR * np.std(qprof, axis=0)
-    targetN = (newR / newdR) ** 2
-    target_incident_neutrons = targetN / newR
-    N, Nbkg, Ninc = sim_data_N(newR, target_incident_neutrons, background=0)
-    #print(newR, target_incident_neutrons, N, Nbkg, Ninc)
-    T = q2a(newQ, wv)
-    dT = np.polyval(pres, newQ)
-    L = np.ones_like(newQ)*wv
-    dL = np.ones_like(newQ)*dwv
+def create_init_data_N(newQs, qprofs, dRoR):
+    init_data = list()
+    for newQ, qprof in zip(newQs, qprofs):
+        newR, newdR = np.mean(qprof, axis=0), dRoR * np.std(qprof, axis=0)
+        targetN = (newR / newdR) ** 2
+        target_incident_neutrons = targetN / newR
+        N, Nbkg, Ninc = sim_data_N(newR, target_incident_neutrons, background=0)
+        #print(newR, target_incident_neutrons, N, Nbkg, Ninc)
+        T = q2a(newQ, wv)
+        dT = np.polyval(pres, newQ)
+        L = np.ones_like(newQ)*wv
+        dL = np.ones_like(newQ)*dwv
     
-    return T, dT, L, dL, N, Nbkg, Ninc
+    init_data.append((T, dT, L, dL, N, Nbkg, Ninc))
+
+    return init_data
 
 def create_init_data(newQ, qprof, dRoR):
     newR, newdR = np.mean(qprof, axis=0), dRoR * np.std(qprof, axis=0)
@@ -224,20 +228,26 @@ def calc_init_entropy(problem, select_pars=None):
 def calc_qprofiles(problem, drawpoints, Qth, oversampling=None):
     # given a problem and a sample draw and a Q-vector, calculate the profiles associated with each sample
     calcproblem = copy.deepcopy(problem)
+    mlist = [calcproblem] if hasattr(calcproblem, 'fitness') else list(calcproblem.models)
     newvars = gen_new_variables(Qth)
     qprof = list()
     Qbkg = list()
     for p in drawpoints:
         calcproblem.setp(p)
         calcproblem.chisq_str()
-        Rth = calc_expected_R(calcproblem.fitness, *newvars, oversampling=oversampling)
-        qprof.append(Rth)
-        Qbkg.append(p[0])
+        qprof_item = list()
+        Qbkg_item = list()
+        for m in mlist:
+            Rth = calc_expected_R(m.fitness, *newvars, oversampling=oversampling)
+            qprof_item.append(Rth)
+            Qbkg_item.append(p[0])
+        qprof.append(qprof_item)
+        Qbkg.append(Qbkg_item)
 
-    Qprofiles = np.array(qprof)
-    Qbkg = np.array(Qbkg)
+    Qprofiles = np.array(qprof, ndmin=3)
+    Qbkg = np.array(Qbkg, ndmin=2)
 
-    return Qprofiles, Qbkg
+    return np.swapaxes(Qprofiles, 0, 1), Qbkg.T
 
 def plot_qprofiles(Qth, qprofs, logps, data=None, ax=None, exclude_from=0):
     #Qs, Rs, dRs = problem.fitness.probe.Q[exclude_from:], problem.fitness.probe.R[exclude_from:], problem.fitness.probe.dR[exclude_from:]
@@ -278,113 +288,114 @@ def plot_qprofiles(Qth, qprofs, logps, data=None, ax=None, exclude_from=0):
     return fig, (ax, ax2, ax3)
 
 
-def select_new_points(problem, drawpoints, Qth, qprof, qbkg, alpha=0.5, npoints=1, select_pars=None, ax=None):
+def calc_foms(problem, drawpoints, Qth, qprofs, qbkgs, eta=0.5, select_pars=None, axs=None):
     
+    models = [problem] if hasattr(problem, 'fitness') else list(problem.models)
+    nmodels = len(models)
+
     # define parameter numbers to select
     if select_pars is None:
         sel = np.arange(len(drawpoints[0,:]))
     else:
         sel = np.array(select_pars)
 
+    if axs is None:
+        axs = [None] * nmodels
+    else:
+        assert len(axs) == len(nmodels), 'Axis list must have same length as number of models'
+
     pts = drawpoints[:,sel]
-
-    #Subtract background component from each profile to leave the reflectivity signal.
-    #qprof -= qbkg[:,None]
-
-    # normalized cross covariance matrix. This is equal to the Pearson correlation coefficient between x_i and q_j.
-    covXQ = np.cov((pts/np.std(pts, axis=0)).T, (qprof/np.std(qprof, axis=0)).T)[len(sel):, :len(sel)]
-
-    # normalized covariance matrix for parameters X
-    covR = np.cov((pts/np.std(pts, axis=0)).T)
-
-    # variances of individual parameters
-    varX = (np.std(pts, axis=0)/np.mean(pts, axis=0))**2
 
     # calculate incident intensity everywhere
     news1 = np.polyval(ps1, Qth)
     incident_neutrons = np.polyval(p_intens, news1)    # incident rate per second
 
-    # define signal to background. For now, this is just a scaling factor on the effective rate
-    sbr = (qprof - qbkg[:,None]) / qbkg[:,None]
-    refl_rate = incident_neutrons * np.mean((qprof - qbkg[:,None])/(1+2/sbr), axis=0)
-
-    # q-dependent noise. Use the minimum of the actual spread in Q and the expected spread from the nearest points.
-    # TODO: Is this really the right thing to do? Should probably just be the actual spread; the problem is that if
-    # the spread doesn't constrain the variables very much, then we just keep measuring at the same point over and over.
-    minstd = np.min(np.vstack((np.std(qprof, axis=0), np.interp(Qth, problem.fitness.probe.Q, problem.fitness.probe.dR))), axis=0)
-    totalrate = refl_rate * (minstd/np.mean(qprof, axis=0))**4
-    #totalrate = refl_rate * (np.std(qprof, axis=0)/np.mean(qprof, axis=0))**4
-
-    if 0:
-        plt.figure()
-        plt.semilogy(Qth, np.std(qprof, axis=0)/np.mean(qprof, axis=0))
-        plt.semilogy(Qth, np.interp(Qth, problem.fitness.probe.Q, problem.fitness.probe.dR)/np.mean(qprof, axis=0))
-        plt.semilogy(Qth, minstd/np.mean(qprof, axis=0))
-
-        plt.figure()
-        plt.semilogy(Qth, refl_rate)
-        plt.semilogy(Qth, incident_neutrons)
-
-        #print(covXQ.shape, covR.shape, totalrate.shape, (covXQ*totalrate[:, None]).shape, varX.shape)
-        plt.figure()
-        plt.pcolor(np.abs(covXQ)*totalrate[:, None]/varX)
-
-    # define the figure of merit
-#    fom_org = 0.5 * np.sum(np.abs(covXQ)*totalrate[:, None]/varX, axis=1)
-
     # alternative approach
-    reg = LinearRegression(fit_intercept=True)
-    reg.fit(drawpoints/np.std(drawpoints, axis=0), qprof/np.std(qprof, axis=0))
-    reg_marg = LinearRegression(fit_intercept=True)
-    reg_marg.fit(pts[:,:]/np.std(pts[:,:], axis=0), qprof/np.std(qprof, axis=0))
-    J = reg.coef_.T
-    J_marg = reg_marg.coef_.T
-    covX = np.cov((drawpoints/np.std(drawpoints, axis=0)).T)
-    covX_marg = np.cov((pts/np.std(pts, axis=0)).T)
-    df2s = np.zeros_like(Qth)
-    df2s_marg = np.zeros_like(Qth)    
-    for j in range(len(Qth)):
-        Jj = J[:,j][:,None]
-        df2s[j] = np.squeeze(Jj.T @ covX @ Jj)
-        #print('all',np.linalg.det(Jj.T @ Jj))
+    models = [problem] if hasattr(problem, 'fitness') else list(problem.models)
+    foms = np.empty((qprofs.shape[0], qprofs.shape[2]))
+    meas_times = np.empty_like(foms)
+    for m, qprof, qbkg, fom, meas_time, ax in zip(models, qprofs, qbkgs, foms, meas_times, axs):
 
-        Jj = J_marg[:,j][:,None]
-        df2s_marg[j] = np.squeeze(Jj.T @ covX_marg @ Jj)
-        #print(np.linalg.det(Jj @ Jj.T))
+        # define signal to background. For now, this is just a scaling factor on the effective rate
+        sbr = (qprof - qbkg[:,None]) / qbkg[:,None]
+        refl_rate = incident_neutrons * np.mean((qprof - qbkg[:,None])/(1+2/sbr), axis=0)
 
-#    fom2 = 0.5 * np.sum(np.abs(reg_marg.coef_)**2*totalrate[:, None]/varX, axis=1)
+        # q-dependent noise. Use the minimum of the actual spread in Q and the expected spread from the nearest points.
+        # TODO: Is this really the right thing to do? Should probably just be the actual spread; the problem is that if
+        # the spread doesn't constrain the variables very much, then we just keep measuring at the same point over and over.
+        minstd = np.min(np.vstack((np.std(qprof, axis=0), np.interp(Qth, m.fitness.probe.Q, m.fitness.probe.dR))), axis=0)
+        totalrate = refl_rate * (minstd/np.mean(qprof, axis=0))**4
+        #totalrate = refl_rate * (np.std(qprof, axis=0)/np.mean(qprof, axis=0))**4
 
-    fom = 0.5 * df2s_marg/df2s*totalrate
+        reg = LinearRegression(fit_intercept=True)
+        reg.fit(drawpoints/np.std(drawpoints, axis=0), qprof/np.std(qprof, axis=0))
+        reg_marg = LinearRegression(fit_intercept=True)
+        reg_marg.fit(pts[:,:]/np.std(pts[:,:], axis=0), qprof/np.std(qprof, axis=0))
+        J = reg.coef_.T
+        J_marg = reg_marg.coef_.T
+        covX = np.cov((drawpoints/np.std(drawpoints, axis=0)).T)
+        covX_marg = np.cov((pts/np.std(pts, axis=0)).T)
+        df2s = np.zeros_like(Qth)
+        df2s_marg = np.zeros_like(Qth)    
+        for j in range(len(Qth)):
+            Jj = J[:,j][:,None]
+            df2s[j] = np.squeeze(Jj.T @ covX @ Jj)
+            #print('all',np.linalg.det(Jj.T @ Jj))
 
-    # find maximum positions
-    # a. calculate whether gradient is > 0
-    dfom = np.sign(np.diff(np.append(np.insert(fom, 0, 0),0))) < 0
-    # b. find zero crossings
-    xings = np.diff(dfom.astype(float))
-    maxidx = np.where(xings>0)[0]
-    maxfom = fom[maxidx]
-    maxq = Qth[maxidx]
-    #print(maxidx, maxq, maxfom)
+            Jj = J_marg[:,j][:,None]
+            df2s_marg[j] = np.squeeze(Jj.T @ covX_marg @ Jj)
+            #print(np.linalg.det(Jj @ Jj.T))
 
-    # sorts indices by fom and selects the last npoints
-    top_idx = [i for _, i in sorted(zip(maxfom, maxidx))][-npoints:]
-    # then sorts so Q is ascending (important for reflectivity calculation)
-    top_idx.sort()
-    top_idx = np.array(top_idx)
+    #    fom2 = 0.5 * np.sum(np.abs(reg_marg.coef_)**2*totalrate[:, None]/varX, axis=1)
 
-    if ax is not None:
-        
-        ax.semilogy(Qth, fom)
-        ax.semilogy(Qth, totalrate)
-        ax.plot(Qth[top_idx], fom[top_idx], 'o', alpha=0.5)
-    
-    # used with old covariance-based methods
-#    meas_times = alpha/((1-alpha)*refl_rate[top_idx] * (minstd[top_idx]/np.mean(qprof, axis=0)[top_idx])**2)
-    #print('suggested measurement times: ', alpha/((1-alpha)*refl_rate[top_idx] * (minstd[top_idx]/np.mean(qprof, axis=0)[top_idx])**2))
-    meas_times = (1-alpha) / (alpha**2 * refl_rate * (minstd/np.mean(qprof, axis=0))**2)
-    meas_times = meas_times[top_idx]
+        fom = df2s_marg/df2s*totalrate
 
-    return Qth[top_idx], fom[top_idx], meas_times, fom
+        meas_time = (1-eta) / (eta**2 * refl_rate * (minstd/np.mean(qprof, axis=0))**2)
+
+        if ax is not None:
+            ax.semilogy(Qth, fom)
+
+    return foms, meas_times
+
+def select_new_points(Qth, foms, meas_times, npoints=1, switch_penalty=None):
+    # switch penalty is the penalty for switching to a different model. Should be a list of the same size as the number of models (foms.shape[0]),
+    # and range between 1 (no penalty) and infinity (infinity for models that you can't go backwards to, for example, due to irreversible experimental
+    # conditions)
+
+    nmodels = foms.shape[0]
+
+    if switch_penalty is None:
+        switch_penalty = np.ones((nmodels,1,1))
+
+    scaled_foms = foms / switch_penalty
+
+    maxQs = [[]] * nmodels
+    maxidxs = [[]] * nmodels
+    maxfoms = [[]] * nmodels
+
+    for fom, maxQ, maxidx, maxfom in zip(foms, maxQs, maxidxs, maxfoms):
+        # find maximum positions
+        # a. calculate whether gradient is > 0
+        dfom = np.sign(np.diff(np.append(np.insert(fom, 0, 0),0))) < 0
+        # b. find zero crossings
+        xings = np.diff(dfom.astype(float))
+        maxidx = np.where(xings>0)[0]
+        maxfom = fom[maxidx]
+        maxQ = Qth[maxidx]
+
+    maxidxs_m = [[fom, m, idx] for m, (idxs, foms) in enumerate(zip(maxidxs, maxfoms)) for idx, fom in (idxs, foms)]
+    # select top npoints (if there are enough of them)
+    top_n = sorted(maxidxs_m, reverse=True)[:min(npoints, len(maxidxs_m))]
+
+    newQs = [[]] * nmodels
+    new_meastimes = [[]] * nmodels
+    new_foms = [[]] * nmodels
+    for i in range(nmodels):
+        newQs.append([Qth[idx] for _, j, idx in top_n if i==j])
+        new_meastimes.append([meas_times[i][idx] for _, j, idx in top_n if i==j])
+        new_foms.append([fom for fom, j, _ in top_n if i==j])
+
+    return newQs, new_meastimes, new_foms
 
 class DreamFitPlus(DreamFit):
     def __init__(self, problem):
