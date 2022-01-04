@@ -55,8 +55,9 @@ def sim_data_N(R, incident_neutrons, addnoise=True, background=0):
     return N, bN, incident_neutrons
 
 def gen_new_variables(newQ):
-    T = q2a(newQ, wv)
-    dT = np.polyval(pres, newQ)
+    Q = np.array(newQ)
+    T = q2a(Q, wv)
+    dT = np.polyval(pres, Q)
     L = wv
     dL = dwv
     
@@ -111,7 +112,7 @@ def create_init_data_N(newQs, qprofs, dRoR):
         L = np.ones_like(newQ)*wv
         dL = np.ones_like(newQ)*dwv
     
-    init_data.append((T, dT, L, dL, N, Nbkg, Ninc))
+        init_data.append((T, dT, L, dL, N, Nbkg, Ninc))
 
     return init_data
 
@@ -229,25 +230,22 @@ def calc_qprofiles(problem, drawpoints, Qth, oversampling=None):
     # given a problem and a sample draw and a Q-vector, calculate the profiles associated with each sample
     calcproblem = copy.deepcopy(problem)
     mlist = [calcproblem] if hasattr(calcproblem, 'fitness') else list(calcproblem.models)
-    newvars = gen_new_variables(Qth)
+    newvars = [gen_new_variables(Qs) for Qs in Qth]
     qprof = list()
     Qbkg = list()
-    for p in drawpoints:
-        calcproblem.setp(p)
-        calcproblem.chisq_str()
+    for m, newvar in zip(mlist, newvars):
         qprof_item = list()
         Qbkg_item = list()
-        for m in mlist:
-            Rth = calc_expected_R(m.fitness, *newvars, oversampling=oversampling)
+        for p in drawpoints:
+            calcproblem.setp(p)
+            calcproblem.chisq_str()
+            Rth = calc_expected_R(m.fitness, *newvar, oversampling=oversampling)
             qprof_item.append(Rth)
-            Qbkg_item.append(p[0])
-        qprof.append(qprof_item)
-        Qbkg.append(Qbkg_item)
+            Qbkg_item.append(m.fitness.probe.background.value)
+        qprof.append(np.array(qprof_item))
+        Qbkg.append(np.array(Qbkg_item))
 
-    Qprofiles = np.array(qprof, ndmin=3)
-    Qbkg = np.array(Qbkg, ndmin=2)
-
-    return np.swapaxes(Qprofiles, 0, 1), Qbkg.T
+    return qprof, Qbkg
 
 def plot_qprofiles(Qth, qprofs, logps, data=None, ax=None, exclude_from=0):
     #Qs, Rs, dRs = problem.fitness.probe.Q[exclude_from:], problem.fitness.probe.R[exclude_from:], problem.fitness.probe.dR[exclude_from:]
@@ -312,7 +310,7 @@ def calc_foms(problem, drawpoints, Qth, qprofs, qbkgs, eta=0.5, select_pars=None
 
     # alternative approach
     models = [problem] if hasattr(problem, 'fitness') else list(problem.models)
-    foms = np.empty((qprofs.shape[0], qprofs.shape[2]))
+    foms = np.empty((len(models), len(Qth)))
     meas_times = np.empty_like(foms)
     for m, qprof, qbkg, fom, meas_time, ax in zip(models, qprofs, qbkgs, foms, meas_times, axs):
 
@@ -365,23 +363,25 @@ def select_new_points(Qth, foms, meas_times, npoints=1, switch_penalty=None):
     nmodels = foms.shape[0]
 
     if switch_penalty is None:
-        switch_penalty = np.ones((nmodels,1,1))
+        switch_penalty = np.ones((nmodels,1))
 
     scaled_foms = foms / switch_penalty
 
     maxQs = [[]] * nmodels
     maxidxs = [[]] * nmodels
     maxfoms = [[]] * nmodels
-
-    for fom, maxQ, maxidx, maxfom in zip(foms, maxQs, maxidxs, maxfoms):
+    print(foms.shape, scaled_foms.shape)
+    for fom, maxQ, maxidx, maxfom in zip(scaled_foms, maxQs, maxidxs, maxfoms):
         # find maximum positions
         # a. calculate whether gradient is > 0
         dfom = np.sign(np.diff(np.append(np.insert(fom, 0, 0),0))) < 0
         # b. find zero crossings
         xings = np.diff(dfom.astype(float))
         maxidx = np.where(xings>0)[0]
-        maxfom = fom[maxidx]
-        maxQ = Qth[maxidx]
+        maxfoms.append(fom[maxidx])
+        maxQs.append(Qth[maxidx])
+        maxidxs.append(maxidx)
+
 
     maxidxs_m = [[fom, m, idx] for m, (idxs, foms) in enumerate(zip(maxidxs, maxfoms)) for idx, fom in (idxs, foms)]
     # select top npoints (if there are enough of them)

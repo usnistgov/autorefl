@@ -70,9 +70,9 @@ calcmodels = [calcmodel] if hasattr(calcmodel, 'fitness') else list(calcmodel.mo
 
 # make a copy of the model for dynamic updating
 # define parameter scales.
-newmodels = [copy.deepcopy(m.fitness) for m in models]
+newmodels = [m.fitness for m in models]
 par_scale = np.diff(model.bounds(), axis=0)
-calcprobes = [copy.deepcopy(m.fitness) for m in calcmodels]
+calcprobes = [m.fitness for m in calcmodels]
 
 # add in background
 bkg = 1e-6
@@ -112,13 +112,13 @@ def run_cycle(fitnesslist, measQ, newQs, datalist, use_entropy=True, restart_pop
 
     fitter.state.keep_best()
     fitter.state.mark_outliers()
-    d = fitter.state.draw(thin=fit_options['steps'])
+    d = fitter.state.draw(thin=fit_options['steps']*5)
     best_logp = fitter.state.best()[1]
     newproblem.setp(fitter.state.best()[0])
     final_chisq = newproblem.chisq_str()
 
     if use_entropy:
-        qprofs, qbkgs = calc_qprofiles(newproblem, d.points, measQ, oversampling)
+        qprofs, qbkgs = calc_qprofiles(newproblem, d.points, [measQ] * len(fitnesslist), oversampling)
         #plot_qprofiles(newproblem, measQ, qprof, d.logp)
 
         foms, meas_times = calc_foms(newproblem, d.points, measQ, qprofs, qbkgs, eta=alpha, select_pars=sel)
@@ -158,10 +158,12 @@ all_median_logps = list()
 all_foms = list()
 
 # generate initial data set
-nQs = [(npars // nmodels) + 1 if i < (npars % nmodels) else (npars // nmodels) for i in range(nmodels)]
+# Note: following line should work, but doesn't. Each model needs more data points than fitting parameters, apparently.
+nQs = [((npars + 1) // nmodels) + 1 if i < ((npars + 1) % nmodels) else ((npars + 1) // nmodels) for i in range(nmodels)]
+#nQs = [npars + 1] * nmodels
 newQs = list()
 new_meastimes = list()
-for m, nQ in zip(models, nQs):
+for nQ in nQs:
     newQs.append(np.linspace(minQ, maxQ, nQ, endpoint=True))
     new_meastimes.append(np.zeros_like(newQs[-1]))
 
@@ -180,7 +182,7 @@ for kk in range(nrepeats):
     t=[0]
     Hs = list()
     Hs_marg = list()
-    meastimes = [list() for i in range(nmodels)]
+    meastimes = [[]] * nmodels 
     best_logps = list()
     median_logps = list()
     iter_foms = list()
@@ -193,18 +195,15 @@ for kk in range(nrepeats):
     # define space of possible measurements. Same space is used for all models
     measQ = np.linspace(minQ, maxQ, 201, endpoint=True)
 
-    # reset model
-    newmodel = [copy.deepcopy(m.fitness) for m in models]
-
     # generate initial data
-    for m in newmodel:
+    for m in newmodels:
         m.probe.oversample(oversampling)
         m.update()
-    newproblem = FitProblem(newmodel)
+    newproblem = FitProblem(newmodels)
     initpts = generate(newproblem, init='lhs', pop=fit_options['pop'], use_point=False)
     iqprof, iqbkg = calc_qprofiles(newproblem, initpts, newQs)
     data = create_init_data_N(newQs, iqprof, dRoR=10.0)
-
+    print(newQs, meastimes, new_meastimes, data, calcprobes)
     while t[-1] < maxtime:
         starttime = time.time()
         print('Now on cycle %i' % k, flush=True)
