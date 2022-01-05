@@ -179,15 +179,16 @@ for kk in range(nrepeats):
     fid.write('Auto iteration %i\n' % kk)
     iteration_start = time.time()
     k=0
-    t=[0]
+    t=[]
+    total_t = 0.0
     Hs = list()
     Hs_marg = list()
-    meastimes = [[] for _ in nmodels]
+    meastimes = [[] for _ in range(nmodels)]
     best_logps = list()
     median_logps = list()
-    iter_foms = [[] for _ in nmodels]
+    iter_foms = [[] for _ in range(nmodels)]
     varXs = list()
-    last_foms = [None for _ in  nmodels]
+    last_foms = [None for _ in range(nmodels)]
     restart_pop=None
 
     frames = list()        
@@ -203,11 +204,11 @@ for kk in range(nrepeats):
     initpts = generate(newproblem, init='lhs', pop=fit_options['pop'], use_point=False)
     iqprof, iqbkg = calc_qprofiles(newproblem, initpts, newQs)
     data = create_init_data_N(newQs, iqprof, dRoR=10.0)
-    print(newQs, meastimes, new_meastimes, data, calcprobes)
-    while t[-1] < maxtime:
+#    print(newQs, meastimes, new_meastimes, data, calcprobes)
+    while total_t < maxtime:
         starttime = time.time()
         print('Now on cycle %i' % k, flush=True)
-        print('Total time so far: %f' % t[-1])
+        print('Total time so far: %f' % total_t)
         fid.write('Cycle: %i\n' % k)
         for i, (newQ, meas_time, new_meastime, idata, calcprobe) in enumerate(zip(newQs, meastimes, new_meastimes, data, calcprobes)):
             fid.write(('Q[%i]: ' % i) + ', '.join(map(str, newQ)) + '\n')
@@ -215,16 +216,18 @@ for kk in range(nrepeats):
             print(('newQ[%i]: ' % i), newQ)
             print(('Time[%i]: ' % i) + ', '.join(map(str, new_meastime)))
             meas_time.append(new_meastime)
-            t = np.cumsum(np.array([sum(m) for m in meas_time]))
-            if k > 0:
+            if (k > 0) & (len(newQ) > 0):
                 newvars = gen_new_variables(newQ)
                 calcR = calc_expected_R(calcprobe, *newvars, oversampling=oversampling)
-                idata = append_data_N(newQ, calcR, meas_time, bkg, *idata)
+                data[i] = append_data_N(newQ, calcR, new_meastime, bkg, *idata)
+
+        total_t = sum([sum(m) for mt in meastimes for m in mt])
+        t.append(total_t)
 
         newQs, new_meastimes, restart_pop, best_logp, final_chisq, d, newfoms, qprofs, qbkgs, foms = run_cycle(newmodels, measQ, newQs, data, use_entropy=True, restart_pop=restart_pop, outfid=None)
 
         # impose a minimum 10 s measurement time
-        new_meastime = [np.maximum(m, 10.0 * np.ones_like(m)) for m in new_meastimes]
+        new_meastimes = [np.maximum(m, 10.0 * np.ones_like(m)) for m in new_meastimes]
 
         Hs.append(calc_entropy(d.points / par_scale))
         Hs_marg.append(calc_entropy(d.points / par_scale, select_pars=sel))
@@ -244,9 +247,11 @@ for kk in range(nrepeats):
             total_meastime = 0.0
             for newQ, meas_time, idata, qprof, cur_fom, last_fom, newfom, axtop, axbot in zip(newQs, meastimes, data, qprofs, foms, last_foms, newfoms, axtops, axbots):
                 plotdata = tuple([v[len(meas_time[0]):] for v in idata]) if k > 0 else None
+#                print(meas_time, idata[0])
                 plot_qprofiles(measQ, qprof, d.logp, data=plotdata, ax=axtop)
-                axtop.set_title('t = %0.0f s' % np.sum(meas_time), fontsize='larger')
-                total_meastime += np.sum(meas_time)
+                meas_time_sum = np.sum([sum(mt) for mt in meas_time])
+                axtop.set_title('t = %0.0f s' % meas_time_sum, fontsize='larger')
+                total_meastime += meas_time_sum
                 if last_fom is not None:
                     axbot.semilogy(measQ, last_fom, linewidth=2, alpha=0.4, color='C0')
                 last_fom = cur_fom
@@ -280,12 +285,12 @@ for kk in range(nrepeats):
     fid.flush()
 
     np.savetxt(fn + fsuffix + '-timevars%i.txt' % kk, np.vstack((t, Hs, Hs_marg, Hs0-np.array(Hs), Hs0_marg - np.array(Hs_marg), best_logps, median_logps, np.array(varXs).T)).T, header='t, Hs, Hs_marg, dHs, dHs_marg, best_logps, median_logps, nxparameter_variances')
-    for mnum, (idata, meas_time, fom) in enumerate(zip(data, meastimes, iter_foms)):
-        idata = np.array(idata)
-        cycletime = np.array([(i, val) for i, m in enumerate(meas_time) for val in m])
+#    for mnum, (idata, meas_time, fom) in enumerate(zip(data, meastimes, iter_foms)):
+#        idata = np.array(idata)
+#        cycletime = np.array([(i, val) for i, m in enumerate(meas_time) for val in m])
     #    print(data.shape, cycletime.shape, data[0,:][None,:].shape, data[:,0][:,None].shape)
-        np.savetxt(fn + fsuffix + '-data%i_m%i.txt' % (kk, mnum), np.hstack((a2q(data[0,:], data[2,:])[:,None], cycletime, data.T)), header='Q, cycle, meas_time, T, dT, L, dL, Nspecular, Nbackground, Nincident')
-        np.savetxt(fn + fsuffix + '-foms%i_m%i.txt' % (kk, mnum), np.vstack((measQ, np.array(fom))).T, header='Q, figure_of_merit')
+#        np.savetxt(fn + fsuffix + '-data%i_m%i.txt' % (kk, mnum), np.hstack((a2q(idata[0,:], idata[2,:])[:,None], cycletime, idata.T)), header='Q, cycle, meas_time, T, dT, L, dL, Nspecular, Nbackground, Nincident')
+#        np.savetxt(fn + fsuffix + '-foms%i_m%i.txt' % (kk, mnum), np.vstack((measQ, np.array(fom))).T, header='Q, figure_of_merit')
 
 #np.savetxt(fn + fsuffix + '-timevars_all.txt', np.vstack((t, Hs, Hs_marg, best_logps, median_logps)), header='t, Hs, Hs_marg, best_logps, median_logps')
 fid.close()

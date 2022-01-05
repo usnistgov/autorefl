@@ -27,7 +27,7 @@ pres = np.polyfit(qs, ares, 1)
 ps1 = np.polyfit(qs, s1s, 1)
 
 def q2a(q, L):
-    return np.degrees(np.arcsin(q*L/(4*np.pi)))
+    return np.degrees(np.arcsin(np.array(q)*L/(4*np.pi)))
 
 def a2q(T, L):
     return 4*np.pi/L * np.sin(np.radians(T))
@@ -129,7 +129,7 @@ def create_init_data(newQ, qprof, dRoR):
 
 def compile_data(Qbasis, T, dT, L, dL, R, dR):
     _Q = TL2Q(T=T, L=L)
-    # make sure end bins contain the first and last Q values (always should)
+        # make sure end bins contain the first and last Q values (always should)
     Qbasis[0] = min(min(Qbasis), min(_Q))
     Qbasis[-1] = max(max(Qbasis), max(_Q))
     _R, _bins = np.histogram(_Q, Qbasis, weights=R/dR**2)
@@ -142,35 +142,39 @@ def compile_data(Qbasis, T, dT, L, dL, R, dR):
     _dL = np.ones_like(_T) * dwv
     _Q = TL2Q(_T, _L)
     _dT = np.polyval(pres, _Q)
-    _dQ = dTdL2dQ(_T, _dT, _L, _dL)    
+    _dQ = dTdL2dQ(_T, _dT, _L, _dL)
 
     return _T, _dT, _L, _dL, _R, _dR, _Q, _dQ
-
 
 def compile_data_N(Qbasis, T, dT, L, dL, Ntot, Nbkg, Ninc):
     _Q = TL2Q(T=T, L=L)
+#    print('compile_data_N: ', len(_Q), _Q)
+    if len(_Q):
     # make sure end bins contain the first and last Q values (always should)
-    Qbasis[0] = min(min(Qbasis), min(_Q))
-    Qbasis[-1] = max(max(Qbasis), max(_Q))
-    _N, _bins = np.histogram(_Q, Qbasis, weights=Ntot)
-    _Nbkg = np.histogram(_Q, Qbasis, weights=Nbkg)[0]
-    _norm = np.histogram(_Q, Qbasis, weights=Ninc)[0]
-    nz = _norm.nonzero()
-    _R = (_N[nz]-_Nbkg[nz])/_norm[nz]
-    _Nmin = np.max(np.vstack(((_N + _Nbkg), np.ones_like(_N))), axis=0)
-    _dR = np.sqrt(_Nmin)[nz] / _norm[nz]
-    #print(_Q.shape, _dR.shape)
-    _normR = np.histogram(_Q, Qbasis, weights=1./dT**2)[0][nz]
-    _T = np.histogram(_Q, Qbasis, weights=T/dT**2)[0][nz]/_normR
-    _L = np.ones_like(_T) * wv
-    _dL = np.ones_like(_T) * dwv
-    _Q = TL2Q(_T, _L)
-    _dT = np.polyval(pres, _Q)
-    _dQ = dTdL2dQ(_T, _dT, _L, _dL)    
+        Qbasis[0] = min(min(Qbasis), min(_Q))
+        Qbasis[-1] = max(max(Qbasis), max(_Q))
+        _N, _bins = np.histogram(_Q, Qbasis, weights=Ntot)
+        _Nbkg = np.histogram(_Q, Qbasis, weights=Nbkg)[0]
+        _norm = np.histogram(_Q, Qbasis, weights=Ninc)[0]
+        nz = _norm.nonzero()
+        _R = (_N[nz]-_Nbkg[nz])/_norm[nz]
+        _Nmin = np.max(np.vstack(((_N + _Nbkg), np.ones_like(_N))), axis=0)
+        _dR = np.sqrt(_Nmin)[nz] / _norm[nz]
+        #print(_Q.shape, _dR.shape)
+        _normR = np.histogram(_Q, Qbasis, weights=1./dT**2)[0][nz]
+        _T = np.histogram(_Q, Qbasis, weights=T/dT**2)[0][nz]/_normR
+        _L = np.ones_like(_T) * wv
+        _dL = np.ones_like(_T) * dwv
+        _Q = TL2Q(_T, _L)
+        _dT = np.polyval(pres, _Q)
+        _dQ = dTdL2dQ(_T, _dT, _L, _dL)    
 
-    #print(_R, _dR, _N[nz], _Nbkg[nz], _norm[nz])
+        return _T, _dT, _L, _dL, _R, _dR, _Q, _dQ
 
-    return _T, _dT, _L, _dL, _R, _dR, _Q, _dQ
+    else:
+
+        return [], [], [], [], [], [], [], []
+
 
 def append_data_overlap(newQ, Rth, meas_time, bkgd, T, dT, L, dL, R, dR, overlap_index=None):
     news1 = np.polyval(ps1, newQ)
@@ -256,7 +260,9 @@ def plot_qprofiles(Qth, qprofs, logps, data=None, ax=None, exclude_from=0):
 
     if data is not None:
         _, _, _, _, Rs, dRs, Qs, _ = compile_data_N(Qth, *data)
-        ax.errorbar(Qs[exclude_from:], (Rs*Qs**4)[exclude_from:], (dRs*Qs**4)[exclude_from:], fmt='o', color='k', markersize=10, alpha=0.7, capsize=8, linewidth=3, zorder=100)
+        print('plot_qprofiles: ', len(Qs))
+        if len(Qs) > 0:
+            ax.errorbar(Qs[exclude_from:], (Rs*Qs**4)[exclude_from:], (dRs*Qs**4)[exclude_from:], fmt='o', color='k', markersize=10, alpha=0.7, capsize=8, linewidth=3, zorder=100)
 
     cmin, cmax = np.median(logps) + 2 * np.std(logps) * np.array([-1,1])
     colornorm = colors.Normalize(vmin=cmin, vmax=cmax)
@@ -347,7 +353,7 @@ def calc_foms(problem, drawpoints, Qth, qprofs, qbkgs, eta=0.5, select_pars=None
     #    fom2 = 0.5 * np.sum(np.abs(reg_marg.coef_)**2*totalrate[:, None]/varX, axis=1)
 
         fom = df2s_marg/df2s*totalrate
-        plt.plot(fom)
+#        plt.plot(fom)
         foms.append(fom)
 
         meas_time = (1-eta) / (eta**2 * refl_rate * (minstd/np.mean(qprof, axis=0))**2)
