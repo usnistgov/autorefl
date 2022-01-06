@@ -62,6 +62,7 @@ models = [model] if hasattr(model, 'fitness') else list(model.models)
 nmodels = len(models)
 npars = len(model.getp())
 oversampling = 11
+orgQ = [list(m.fitness.probe.Q) for m in models]    # for use with "even" comparison
 
 # make dedicated calculation model for "ground truth" reflectivity
 calcmodel = load_model(modelfile)
@@ -303,11 +304,10 @@ all_Hs2_marg = list()
 all_best_logps2 = list()
 all_median_logps2 = list()
 
-newQs = models[modelnum].fitness.probe.Q
-measQ2 = newQs
-meastimeweight = newQs**2
+newQs = orgQ
+measQ2 = np.array(newQs[0])
+meastimeweight = measQ2**2
 meastimeweight /= np.sum(meastimeweight)
-data2 = ([], [], [], [], [], [], [])
 restart_pop2=None
 
 fid = open(fn + fsuffix+ '_auto_report_noselect.txt', 'w')
@@ -316,38 +316,38 @@ fid = open(fn + fsuffix+ '_auto_report_noselect.txt', 'w')
 for kk in range(nrepeats):
     fid.write('Auto iteration %i\n' % kk)
     iteration_start = time.time()
+    t2 = list()
     Hs2 = list()
     Hs2_marg = list()
     best_logps2 = list()
     median_logps2 = list()
     varXs2 = list()
-    t = all_t[kk]
-    meastimes2 = np.diff(t) # ends up being one smaller than the initial, because t=0 point is meaningless here
     restart_pop=None
-    all_meastimes2 = list()
+    meastimes2 = [[sum(m) for m in meastimes[i][1:]] for i in range(nmodels)]
 
     # generate data
-    data2 = ([], [], [], [], [], [], [])
+    data2 = [([], [], [], [], [], [], []) for _ in range(nmodels)]
 
-    # reset model
-    newmodel = copy.deepcopy(models[modelnum].fitness)
-
-    for k in range(len(meastimes2)):
+    for k in range(len(meastimes2[0])):
         starttime = time.time()
-        meas_time = meastimes2[k]*meastimeweight
-        print('Now on cycle %i of %i' % (k, len(meastimes2)-1), flush=True)
+        #meas_time = meastimes2[k]*meastimeweight
+        print('Now on cycle %i of %i' % (k, len(meastimes2[0])-1), flush=True)
         fid.write('Cycle: %i\n' % k)
-        fid.write('Q: ' + ', '.join(map(str, newQs)) + '\n')
-        fid.write('Time: ' + ', '.join(map(str, meas_time)) + '\n')
-        print('newQ: ', newQs)
-        all_meastimes2.append(meas_time)
+        for i, (newQ, meas_time2, idata, icalcmodel) in enumerate(zip(newQs, meastimes2, data2, calcmodels)):
+            meas_time = np.array(meas_time2) * meastimeweight
+            fid.write(('Q[%i]: ' % i) + ', '.join(map(str, newQ)) + '\n')
+            fid.write(('Time[%i]: ' % i) + ', '.join(map(str, meas_time)) + '\n')
+            print(('newQ[%i]: ' % i), newQ)
+            print(('Time[%i]: ' % i) + ', '.join(map(str, meas_time)))
+            if (k > 0) & (len(newQ) > 0):
+                newvars = gen_new_variables(newQ)
+                calcR = calc_expected_R(icalcmodel.fitness, *newvars, oversampling=oversampling)
+                data[i] = append_data_N(newQ, calcR, new_meastime, bkg, *idata)        
 
-        newvars = gen_new_variables(newQs)
-        calcR = calc_expected_R(calcprobe, *newvars, oversampling=oversampling)
-        data2 = append_data_N(newQs, calcR, meas_time, bkg, *data2)
+        total_t = sum([sum(m) for mt in meastimes2 for m in mt])
+        t2.append(total_t)
 
         _, _, restart_pop2, best_logp, final_chisq, d, _, _, _, _ = run_cycle(newmodel, measQ, newQs, data2, use_entropy=False, restart_pop=restart_pop2, outfid=None)
-
 
         Hs2.append(calc_entropy(d.points/par_scale))
         Hs2_marg.append(calc_entropy(d.points/par_scale, select_pars=sel))
@@ -359,7 +359,7 @@ for kk in range(nrepeats):
         fid.write('calculation wall time (s): %f\n' % (time.time() - starttime))
         fid.flush()
 
-    all_t2.append(t[1:])
+    all_t2.append(t2)
     all_Hs2.append(Hs2)
     all_Hs2_marg.append(Hs2_marg)
     all_best_logps2.append(best_logps2)
@@ -372,7 +372,7 @@ for kk in range(nrepeats):
 #    cycletime = np.array([(i, val) for i, m in enumerate(all_meastimes2) for val in m])
 #    print(data2.shape, cycletime.shape, data2[0,:][None,:].shape, data2[:,0][:,None].shape)
 #    np.savetxt(fn + fsuffix + '-data%i_noselect.txt' % kk, np.hstack((a2q(data2[0,:], data2[2,:])[:,None], cycletime, data2.T)), header='Q, cycle, meas_time, T, dT, L, dL, Nspecular, Nbackground, Nincident')
-    np.savetxt(fn + fsuffix + '-timevars%i_noselect.txt' % kk, np.vstack((t[1:], Hs2, Hs2_marg, Hs0-np.array(Hs2), Hs0_marg - np.array(Hs2_marg), best_logps2, median_logps2, np.array(varXs2).T)).T, header='t, Hs, Hs_marg, dHs, dHs_marg, best_logps, median_logps, nxparameter_variances')
+    np.savetxt(fn + fsuffix + '-timevars%i_noselect.txt' % kk, np.vstack((t2, Hs2, Hs2_marg, Hs0-np.array(Hs2), Hs0_marg - np.array(Hs2_marg), best_logps2, median_logps2, np.array(varXs2).T)).T, header='t, Hs, Hs_marg, dHs, dHs_marg, best_logps, median_logps, nxparameter_variances')
 
 #np.savetxt(fn + fsuffix + '-timevars_all_noselect.txt', np.vstack((all_t2, Hs2, Hs2_marg, best_logps2, median_logps2)), header='t, Hs, Hs_marg, best_logps, median_logps')
 fid.write('Done!')
