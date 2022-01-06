@@ -260,7 +260,7 @@ def plot_qprofiles(Qth, qprofs, logps, data=None, ax=None, exclude_from=0):
 
     if data is not None:
         _, _, _, _, Rs, dRs, Qs, _ = compile_data_N(Qth, *data)
-        print('plot_qprofiles: ', len(Qs))
+        #print('plot_qprofiles: ', len(Qs))
         if len(Qs) > 0:
             ax.errorbar(Qs[exclude_from:], (Rs*Qs**4)[exclude_from:], (dRs*Qs**4)[exclude_from:], fmt='o', color='k', markersize=10, alpha=0.7, capsize=8, linewidth=3, zorder=100)
 
@@ -400,13 +400,22 @@ def select_new_points(Qth, foms, meas_times, npoints=1, switch_penalty=None):
     top_n = sorted(maxidxs_m, reverse=True)[:min(npoints, len(maxidxs_m))]
     #print(top_n)
 
+    # generate lists of new Q values, new measurement times, and the figure of merit at each point    
+    # must be sorted in ascending Q order for reflectometry calculations
     newQs = []
     new_meastimes = []
     new_foms = []
     for i in range(nmodels):
-        newQs.append([Qth[idx] for _, j, idx in top_n if i==j])
-        new_meastimes.append([meas_times[i][idx] for _, j, idx in top_n if i==j])
-        new_foms.append([fom for fom, j, _ in top_n if i==j])
+        # extract values for each model
+        newQ = [Qth[idx] for _, j, idx in top_n if i==j]
+        new_meastime = [meas_times[i][idx] for _, j, idx in top_n if i==j]
+        new_fom = [fom for fom, j, _ in top_n if i==j]
+
+        # sort in ascending Q order
+        new_meastimes.append([x for y, x in sorted(zip(newQ, new_meastime))])
+        new_foms.append([x for y, x in sorted(zip(newQ, new_fom))])
+        newQs.append(sorted(newQ))
+    
 
     return newQs, new_meastimes, new_foms
 

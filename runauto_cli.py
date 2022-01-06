@@ -72,12 +72,11 @@ calcmodels = [calcmodel] if hasattr(calcmodel, 'fitness') else list(calcmodel.mo
 # define parameter scales.
 newmodels = [m.fitness for m in models]
 par_scale = np.diff(model.bounds(), axis=0)
-calcprobes = [m.fitness for m in calcmodels]
 
 # add in background
 bkg = 1e-6
-for c in calcprobes:
-    c.probe.background.value = bkg
+for c in calcmodels:
+    c.fitness.probe.background.value = bkg
 
 # set Q range
 minQ = 0.008
@@ -88,8 +87,8 @@ maxQ = 0.25
 #%%
 def run_cycle(fitnesslist, measQ, newQs, datalist, use_entropy=True, restart_pop=None, outfid=None):
     
-    for fitness, data in zip(fitnesslist, datalist):
-        mT, mdT, mL, mdL, mR, mdR, mQ, mdQ = compile_data_N(measQ, *data)
+    for fitness, dataitem in zip(fitnesslist, datalist):
+        mT, mdT, mL, mdL, mR, mdR, mQ, mdQ = compile_data_N(measQ, *dataitem)
 
         fitness.probe._set_TLR(mT, mdT, mL, mdL, mR, mdR, dQ=None)
         fitness.probe.oversample(oversampling)
@@ -210,7 +209,7 @@ for kk in range(nrepeats):
         print('Now on cycle %i' % k, flush=True)
         print('Total time so far: %f' % total_t)
         fid.write('Cycle: %i\n' % k)
-        for i, (newQ, meas_time, new_meastime, idata, calcprobe) in enumerate(zip(newQs, meastimes, new_meastimes, data, calcprobes)):
+        for i, (newQ, meas_time, new_meastime, idata, icalcmodel) in enumerate(zip(newQs, meastimes, new_meastimes, data, calcmodels)):
             fid.write(('Q[%i]: ' % i) + ', '.join(map(str, newQ)) + '\n')
             fid.write(('Time[%i]: ' % i) + ', '.join(map(str, new_meastime)) + '\n')
             print(('newQ[%i]: ' % i), newQ)
@@ -218,11 +217,13 @@ for kk in range(nrepeats):
             meas_time.append(new_meastime)
             if (k > 0) & (len(newQ) > 0):
                 newvars = gen_new_variables(newQ)
-                calcR = calc_expected_R(calcprobe, *newvars, oversampling=oversampling)
+                calcR = calc_expected_R(icalcmodel.fitness, *newvars, oversampling=oversampling)
                 data[i] = append_data_N(newQ, calcR, new_meastime, bkg, *idata)
 
         total_t = sum([sum(m) for mt in meastimes for m in mt])
         t.append(total_t)
+
+        fid.write('Total time: %f' % total_t)
 
         newQs, new_meastimes, restart_pop, best_logp, final_chisq, d, newfoms, qprofs, qbkgs, foms = run_cycle(newmodels, measQ, newQs, data, use_entropy=True, restart_pop=restart_pop, outfid=None)
 
@@ -367,10 +368,10 @@ for kk in range(nrepeats):
     fid.write('iteration wall time (s): %f\n' % (time.time() - iteration_start))
     fid.flush()
 
-    data2 = np.array(data2)
-    cycletime = np.array([(i, val) for i, m in enumerate(all_meastimes2) for val in m])
+#    data2 = np.array(data2)
+#    cycletime = np.array([(i, val) for i, m in enumerate(all_meastimes2) for val in m])
 #    print(data2.shape, cycletime.shape, data2[0,:][None,:].shape, data2[:,0][:,None].shape)
-    np.savetxt(fn + fsuffix + '-data%i_noselect.txt' % kk, np.hstack((a2q(data2[0,:], data2[2,:])[:,None], cycletime, data2.T)), header='Q, cycle, meas_time, T, dT, L, dL, Nspecular, Nbackground, Nincident')
+#    np.savetxt(fn + fsuffix + '-data%i_noselect.txt' % kk, np.hstack((a2q(data2[0,:], data2[2,:])[:,None], cycletime, data2.T)), header='Q, cycle, meas_time, T, dT, L, dL, Nspecular, Nbackground, Nincident')
     np.savetxt(fn + fsuffix + '-timevars%i_noselect.txt' % kk, np.vstack((t[1:], Hs2, Hs2_marg, Hs0-np.array(Hs2), Hs0_marg - np.array(Hs2_marg), best_logps2, median_logps2, np.array(varXs2).T)).T, header='t, Hs, Hs_marg, dHs, dHs_marg, best_logps, median_logps, nxparameter_variances')
 
 #np.savetxt(fn + fsuffix + '-timevars_all_noselect.txt', np.vstack((all_t2, Hs2, Hs2_marg, best_logps2, median_logps2)), header='t, Hs, Hs_marg, best_logps, median_logps')
