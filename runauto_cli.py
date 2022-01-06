@@ -112,7 +112,7 @@ def run_cycle(fitnesslist, measQ, newQs, datalist, use_entropy=True, restart_pop
 
     fitter.state.keep_best()
     fitter.state.mark_outliers()
-    d = fitter.state.draw(thin=fit_options['steps']*5)
+    d = fitter.state.draw(thin=fit_options['steps']*2)
     best_logp = fitter.state.best()[1]
     newproblem.setp(fitter.state.best()[0])
     final_chisq = newproblem.chisq_str()
@@ -224,7 +224,7 @@ for kk in range(nrepeats):
         total_t = sum([sum(m) for mt in meastimes for m in mt])
         t.append(total_t)
 
-        fid.write('Total time: %f' % total_t)
+        fid.write('Total time: %f\n' % total_t)
 
         newQs, new_meastimes, restart_pop, best_logp, final_chisq, d, newfoms, qprofs, qbkgs, foms = run_cycle(newmodels, measQ, newQs, data, use_entropy=True, restart_pop=restart_pop, outfid=None)
 
@@ -324,30 +324,32 @@ for kk in range(nrepeats):
     varXs2 = list()
     restart_pop=None
     meastimes2 = [[sum(m) for m in meastimes[i][1:]] for i in range(nmodels)]
-
+    meastimes2 = np.sum(meastimes2, axis=0)
+    print('meastimes', meastimes)
+    print('meastimes2', meastimes2)
     # generate data
     data2 = [([], [], [], [], [], [], []) for _ in range(nmodels)]
 
-    for k in range(len(meastimes2[0])):
+    for k in range(len(meastimes2)):
         starttime = time.time()
         #meas_time = meastimes2[k]*meastimeweight
-        print('Now on cycle %i of %i' % (k, len(meastimes2[0])-1), flush=True)
+        print('Now on cycle %i of %i' % (k, len(meastimes2)-1), flush=True)
         fid.write('Cycle: %i\n' % k)
-        for i, (newQ, meas_time2, idata, icalcmodel) in enumerate(zip(newQs, meastimes2, data2, calcmodels)):
-            meas_time = np.array(meas_time2) * meastimeweight
+        meas_time = meastimes2[k] * meastimeweight / nmodels
+        for i, (newQ, idata, icalcmodel) in enumerate(zip(newQs, data2, calcmodels)):
             fid.write(('Q[%i]: ' % i) + ', '.join(map(str, newQ)) + '\n')
             fid.write(('Time[%i]: ' % i) + ', '.join(map(str, meas_time)) + '\n')
             print(('newQ[%i]: ' % i), newQ)
             print(('Time[%i]: ' % i) + ', '.join(map(str, meas_time)))
-            if (k > 0) & (len(newQ) > 0):
-                newvars = gen_new_variables(newQ)
-                calcR = calc_expected_R(icalcmodel.fitness, *newvars, oversampling=oversampling)
-                data[i] = append_data_N(newQ, calcR, new_meastime, bkg, *idata)        
+            newvars = gen_new_variables(newQ)
+            calcR = calc_expected_R(icalcmodel.fitness, *newvars, oversampling=oversampling)
+            data2[i] = append_data_N(newQ, calcR, meas_time, bkg, *idata)        
 
-        total_t = sum([sum(m) for mt in meastimes2 for m in mt])
+        total_t = sum(meastimes2[:(k+1)])
+        print(total_t, t[k])
         t2.append(total_t)
 
-        _, _, restart_pop2, best_logp, final_chisq, d, _, _, _, _ = run_cycle(newmodel, measQ, newQs, data2, use_entropy=False, restart_pop=restart_pop2, outfid=None)
+        _, _, restart_pop2, best_logp, final_chisq, d, _, _, _, _ = run_cycle(newmodels, measQ2, newQs, data2, use_entropy=False, restart_pop=restart_pop2, outfid=None)
 
         Hs2.append(calc_entropy(d.points/par_scale))
         Hs2_marg.append(calc_entropy(d.points/par_scale, select_pars=sel))

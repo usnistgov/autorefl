@@ -173,7 +173,7 @@ def compile_data_N(Qbasis, T, dT, L, dL, Ntot, Nbkg, Ninc):
 
     else:
 
-        return [], [], [], [], [], [], [], []
+        return tuple([np.array([]) for _ in range(8)])
 
 
 def append_data_overlap(newQ, Rth, meas_time, bkgd, T, dT, L, dL, R, dR, overlap_index=None):
