@@ -287,12 +287,13 @@ for kk in range(nrepeats):
     fid.flush()
 
     np.savetxt(fn + fsuffix + '-timevars%i.txt' % kk, np.vstack((t, Hs, Hs_marg, Hs0-np.array(Hs), Hs0_marg - np.array(Hs_marg), best_logps, median_logps, np.array(varXs).T)).T, header='t, Hs, Hs_marg, dHs, dHs_marg, best_logps, median_logps, nxparameter_variances')
-#    for mnum, (idata, meas_time, fom) in enumerate(zip(data, meastimes, iter_foms)):
-#        idata = np.array(idata)
-#        cycletime = np.array([(i, val) for i, m in enumerate(meas_time) for val in m])
-    #    print(data.shape, cycletime.shape, data[0,:][None,:].shape, data[:,0][:,None].shape)
-#        np.savetxt(fn + fsuffix + '-data%i_m%i.txt' % (kk, mnum), np.hstack((a2q(idata[0,:], idata[2,:])[:,None], cycletime, idata.T)), header='Q, cycle, meas_time, T, dT, L, dL, Nspecular, Nbackground, Nincident')
-#        np.savetxt(fn + fsuffix + '-foms%i_m%i.txt' % (kk, mnum), np.vstack((measQ, np.array(fom))).T, header='Q, figure_of_merit')
+    for mnum, (idata, meas_time, fom) in enumerate(zip(data, meastimes, iter_foms)):
+        idata = np.array(idata)
+        cycletime = np.array([(i, val) for i, m in enumerate(meas_time) for val in m])
+#        print(idata.shape, cycletime.shape, idata[0,:][None,:].shape, idata[:,0][:,None].shape)
+#        print(measQ.shape, np.array(fom).shape)
+        np.savetxt(fn + fsuffix + '-data%i_m%i.txt' % (kk, mnum), np.hstack((a2q(idata[0,:], idata[2,:])[:,None], cycletime, idata.T)), header='Q, cycle, meas_time, T, dT, L, dL, Nspecular, Nbackground, Nincident')
+        np.savetxt(fn + fsuffix + '-foms%i_m%i.txt' % (kk, mnum), np.vstack((measQ, np.array(fom))).T, header='Q, figure_of_merit')
 
 #np.savetxt(fn + fsuffix + '-timevars_all.txt', np.vstack((t, Hs, Hs_marg, best_logps, median_logps)), header='t, Hs, Hs_marg, best_logps, median_logps')
 fid.close()
@@ -325,6 +326,7 @@ for kk in range(nrepeats):
     restart_pop=None
     meastimes2 = [[sum(m) for m in meastimes[i][1:]] for i in range(nmodels)]
     meastimes2 = np.sum(meastimes2, axis=0)
+    meastimes2_write = [[] for _ in range(nmodels)]
     print('meastimes', meastimes)
     print('meastimes2', meastimes2)
     # generate data
@@ -335,15 +337,16 @@ for kk in range(nrepeats):
         #meas_time = meastimes2[k]*meastimeweight
         print('Now on cycle %i of %i' % (k, len(meastimes2)-1), flush=True)
         fid.write('Cycle: %i\n' % k)
-        meas_time = meastimes2[k] * meastimeweight / nmodels
         for i, (newQ, idata, icalcmodel) in enumerate(zip(newQs, data2, calcmodels)):
+            meas_time = meastimes2[k] * meastimeweight / nmodels * np.ones_like(newQ)
             fid.write(('Q[%i]: ' % i) + ', '.join(map(str, newQ)) + '\n')
             fid.write(('Time[%i]: ' % i) + ', '.join(map(str, meas_time)) + '\n')
             print(('newQ[%i]: ' % i), newQ)
             print(('Time[%i]: ' % i) + ', '.join(map(str, meas_time)))
             newvars = gen_new_variables(newQ)
             calcR = calc_expected_R(icalcmodel.fitness, *newvars, oversampling=oversampling)
-            data2[i] = append_data_N(newQ, calcR, meas_time, bkg, *idata)        
+            data2[i] = append_data_N(newQ, calcR, meas_time, bkg, *idata)
+            meastimes2_write[i].append(meas_time)
 
         total_t = sum(meastimes2[:(k+1)])
         print(total_t, t[k])
@@ -375,6 +378,13 @@ for kk in range(nrepeats):
 #    print(data2.shape, cycletime.shape, data2[0,:][None,:].shape, data2[:,0][:,None].shape)
 #    np.savetxt(fn + fsuffix + '-data%i_noselect.txt' % kk, np.hstack((a2q(data2[0,:], data2[2,:])[:,None], cycletime, data2.T)), header='Q, cycle, meas_time, T, dT, L, dL, Nspecular, Nbackground, Nincident')
     np.savetxt(fn + fsuffix + '-timevars%i_noselect.txt' % kk, np.vstack((t2, Hs2, Hs2_marg, Hs0-np.array(Hs2), Hs0_marg - np.array(Hs2_marg), best_logps2, median_logps2, np.array(varXs2).T)).T, header='t, Hs, Hs_marg, dHs, dHs_marg, best_logps, median_logps, nxparameter_variances')
+    for mnum, (idata, meas_time) in enumerate(zip(data2, meastimes2_write)):
+        idata = np.array(idata)
+        cycletime = np.array([(i, val) for i, m in enumerate(meas_time) for val in m])
+#        print(idata.shape, cycletime.shape, idata[0,:][None,:].shape, idata[:,0][:,None].shape)
+#        print(measQ.shape, np.array(fom).shape)
+        np.savetxt(fn + fsuffix + '-data%i_m%i_noselect.txt' % (kk, mnum), np.hstack((a2q(idata[0,:], idata[2,:])[:,None], cycletime, idata.T)), header='Q, cycle, meas_time, T, dT, L, dL, Nspecular, Nbackground, Nincident')
+
 
 #np.savetxt(fn + fsuffix + '-timevars_all_noselect.txt', np.vstack((all_t2, Hs2, Hs2_marg, best_logps2, median_logps2)), header='t, Hs, Hs_marg, best_logps, median_logps')
 fid.write('Done!')
