@@ -24,6 +24,7 @@ parser.add_argument('--alpha', type=float)
 parser.add_argument('--npoints', type=int)
 parser.add_argument('--nrepeats', type=int)
 parser.add_argument('--maxtime', type=float)
+parser.add_argument('--penalty', type=float)
 parser.add_argument('--burn', type=int)
 parser.add_argument('--steps', type=int)
 args = parser.parse_args()
@@ -40,6 +41,7 @@ alpha = 0.5 if args.alpha is None else args.alpha
 npoints = 1 if args.npoints is None else args.npoints
 maxtime = 21.6e3 if args.maxtime is None else args.maxtime
 nrepeats = 10 if args.nrepeats is None else args.nrepeats
+penalty = 1.0 if args.penalty is None else args.penalty
 fit_options['burn'] = 1000 if args.burn is None else args.burn
 fit_options['steps'] = 500 if args.steps is None else args.steps
 
@@ -86,8 +88,10 @@ maxQ = 0.25
 # TODO: simulate real data with real background levels!
 
 #%%
-def run_cycle(fitnesslist, measQ, newQs, datalist, use_entropy=True, restart_pop=None, outfid=None):
+def run_cycle(fitnesslist, measQ, newQs, datalist, curmodel, use_entropy=True, restart_pop=None, outfid=None, switch_penalty=1.0):
     
+    newcurmodel = curmodel
+
     for fitness, dataitem in zip(fitnesslist, datalist):
         mT, mdT, mL, mdL, mR, mdR, mQ, mdQ = compile_data_N(measQ, *dataitem)
 
@@ -123,7 +127,21 @@ def run_cycle(fitnesslist, measQ, newQs, datalist, use_entropy=True, restart_pop
 
         foms, meas_times = calc_foms(newproblem, d.points, measQ, qprofs, qbkgs, eta=alpha, select_pars=sel)
 
-        newQ, meas_time_Q, newfoms = select_new_points(measQ, foms, meas_times, npoints=npoints, switch_penalty=None)
+        # all models incur switch penalty except the current one
+        spenalty = np.full((len(fitnesslist), 1), switch_penalty)
+        spenalty[curmodel] = 1.0
+
+        foms /= spenalty
+
+        newQ, meas_time_Q, newfoms = select_new_points(measQ, foms, meas_times, npoints=npoints)
+
+        # this logic for choosing the next current model only works reliably if npoints=1 or
+        # the number of models is not greater than 2. Otherwise another algorithm is needed.
+        for i, nQ in enumerate(newQ):
+            if (len(nQ)) & (i != curmodel):
+                newcurmodel = i
+                break
+
     else:
         newQ = newQs
         meas_time_Q = meas_time
@@ -132,7 +150,7 @@ def run_cycle(fitnesslist, measQ, newQs, datalist, use_entropy=True, restart_pop
         qbkgs = None
         newfoms = None
 
-    return newQ, meas_time_Q, new_pop, best_logp, final_chisq, d, newfoms, qprofs, qbkgs, foms
+    return newQ, meas_time_Q, newcurmodel, new_pop, best_logp, final_chisq, d, newfoms, qprofs, qbkgs, foms
 
 #%%
 
@@ -181,6 +199,7 @@ for kk in range(nrepeats):
     k=0
     t=[]
     total_t = 0.0
+    curmodel = 0
     Hs = list()
     Hs_marg = list()
     meastimes = [[] for _ in range(nmodels)]
@@ -226,7 +245,7 @@ for kk in range(nrepeats):
 
         fid.write('Total time: %f\n' % total_t)
 
-        newQs, new_meastimes, restart_pop, best_logp, final_chisq, d, newfoms, qprofs, qbkgs, foms = run_cycle(newmodels, measQ, newQs, data, use_entropy=True, restart_pop=restart_pop, outfid=None)
+        newQs, new_meastimes, curmodel, restart_pop, best_logp, final_chisq, d, newfoms, qprofs, qbkgs, foms = run_cycle(newmodels, measQ, newQs, data, curmodel, use_entropy=True, restart_pop=restart_pop, outfid=None, switch_penalty=penalty)
 
         # impose a minimum 10 s measurement time
         new_meastimes = [np.maximum(m, 10.0 * np.ones_like(m)) for m in new_meastimes]
@@ -352,7 +371,7 @@ for kk in range(nrepeats):
         print(total_t, t[k])
         t2.append(total_t)
 
-        _, _, restart_pop2, best_logp, final_chisq, d, _, _, _, _ = run_cycle(newmodels, measQ2, newQs, data2, use_entropy=False, restart_pop=restart_pop2, outfid=None)
+        _, _, _, restart_pop2, best_logp, final_chisq, d, _, _, _, _ = run_cycle(newmodels, measQ2, newQs, data2, 0, use_entropy=False, restart_pop=restart_pop2, outfid=None)
 
         Hs2.append(calc_entropy(d.points/par_scale))
         Hs2_marg.append(calc_entropy(d.points/par_scale, select_pars=sel))

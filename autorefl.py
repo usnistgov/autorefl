@@ -364,33 +364,24 @@ def calc_foms(problem, drawpoints, Qth, qprofs, qbkgs, eta=0.5, select_pars=None
 
     return foms, meas_times
 
-def select_new_points(Qth, foms, meas_times, npoints=1, switch_penalty=None):
-    # switch penalty is the penalty for switching to a different model. Should be a list of the same size as the number of models (foms.shape[0]),
-    # and range between 1 (no penalty) and infinity (infinity for models that you can't go backwards to, for example, due to irreversible experimental
-    # conditions)
+def select_new_points(Qth, foms, meas_times, npoints=1):
 
     nmodels = len(foms)
-
-    if switch_penalty is None:
-        switch_penalty = np.ones((nmodels,1))
 
     maxQs = []
     maxidxs = []
     maxfoms = []
 
-    for fom, pen in zip(foms, switch_penalty):
-        scaled_fom = fom / pen
+    for fom in foms:
         # find maximum positions
         # a. calculate whether gradient is > 0
-        dfom = np.sign(np.diff(np.append(np.insert(scaled_fom, 0, 0),0))) < 0
+        dfom = np.sign(np.diff(np.append(np.insert(fom, 0, 0),0))) < 0
         # b. find zero crossings
         xings = np.diff(dfom.astype(float))
         maxidx = np.where(xings>0)[0]
-        maxfoms.append(scaled_fom[maxidx])
+        maxfoms.append(fom[maxidx])
         maxQs.append(Qth[maxidx])
         maxidxs.append(maxidx)
-        #plt.semilogy(Qth, scaled_fom)
-        #plt.plot(Qth[maxidx], scaled_fom[maxidx], 'o')
 
     #print(maxidxs, maxfoms, maxQs)
 
