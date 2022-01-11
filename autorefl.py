@@ -5,6 +5,7 @@ from bumps.cli import load_model, load_best
 from bumps.fitters import DreamFit, ConsoleMonitor, _fill_defaults, StepMonitor
 from bumps.initpop import generate
 from bumps.dream.state import load_state
+from bumps.mapper import nice
 from refl1d.names import FitProblem, Experiment
 from refl1d.resolution import TL2Q, dTdL2dQ
 import matplotlib.pyplot as plt
@@ -55,7 +56,7 @@ def sim_data_N(R, incident_neutrons, addnoise=True, background=0):
     return N, bN, incident_neutrons
 
 def gen_new_variables(newQ):
-    Q = np.array(newQ)
+    Q = np.array(newQ, ndmin=1)
     T = q2a(Q, wv)
     dT = np.polyval(pres, Q)
     L = wv
@@ -85,7 +86,7 @@ def append_data(newQ, Rth, meas_time, bkgd, T, dT, L, dL, R, dR):
     
     return T, dT, L, dL, R, dR
 
-def append_data_N(newQ, Rth, meas_time, bkgd, T, dT, L, dL, N, Nbkg, Ninc):
+def append_data_N(newQ, Rth, meas_time, bkgd, T=[], dT=[], L=[], dL=[], N=[], Nbkg=[], Ninc=[]):
     news1 = np.polyval(ps1, newQ)
     incident_neutrons = np.polyval(p_intens, news1) * meas_time
     newN, newNbkg, newNinc = sim_data_N(Rth, incident_neutrons, background=bkgd)
@@ -148,7 +149,7 @@ def compile_data(Qbasis, T, dT, L, dL, R, dR):
 
 def compile_data_N(Qbasis, T, dT, L, dL, Ntot, Nbkg, Ninc):
     _Q = TL2Q(T=T, L=L)
-#    print('compile_data_N: ', len(_Q), _Q)
+    #print('compile_data_N: ', len(_Q), _Q, Qbasis)
     if len(_Q):
     # make sure end bins contain the first and last Q values (always should)
         Qbasis[0] = min(min(Qbasis), min(_Q))
@@ -161,8 +162,8 @@ def compile_data_N(Qbasis, T, dT, L, dL, Ntot, Nbkg, Ninc):
         _Nmin = np.max(np.vstack(((_N + _Nbkg), np.ones_like(_N))), axis=0)
         _dR = np.sqrt(_Nmin)[nz] / _norm[nz]
         #print(_Q.shape, _dR.shape)
-        _normR = np.histogram(_Q, Qbasis, weights=1./dT**2)[0][nz]
-        _T = np.histogram(_Q, Qbasis, weights=T/dT**2)[0][nz]/_normR
+        _normR = np.histogram(_Q, Qbasis, weights=1./np.array(dT)**2)[0][nz]
+        _T = np.histogram(_Q, Qbasis, weights=np.array(T)/np.array(dT)**2)[0][nz]/_normR
         _L = np.ones_like(_T) * wv
         _dL = np.ones_like(_T) * dwv
         _Q = TL2Q(_T, _L)
@@ -227,8 +228,8 @@ def calc_entropy(pts, select_pars=None):
     return H
 
 def calc_init_entropy(problem, select_pars=None):
-    par_scale = np.diff(problem.bounds(), axis=0)
-    return calc_entropy(generate(problem, init='random', pop=9, use_point=False)/par_scale, select_pars=select_pars)
+    #par_scale = np.diff(problem.bounds(), axis=0)
+    return calc_entropy(generate(problem, init='random', pop=9, use_point=False), select_pars=select_pars)
 
 def calc_qprofiles(problem, drawpoints, Qth, oversampling=None):
     # given a problem and a sample draw and a Q-vector, calculate the profiles associated with each sample
@@ -476,3 +477,110 @@ class DreamFitPlus(DreamFit):
         #print(points[-1], x)
         #assert all(points[-1, i] == xi for i, xi in enumerate(x))
         return x, -fx
+
+# ============== alternative mapper section from bumps.mapper ================
+# attempting to use the same mapper to calculate the q profiles
+
+def _MP_setup(namespace):
+    # Using MPMapper class variables to store worker globals.
+    # It doesn't matter if they conflict with the controller values since
+    # they are in a different process.
+    MPMapper.namespace = namespace
+    nice()
+
+
+def _MP_run_problem(problem_point_pair):
+    problem_id, point = problem_point_pair
+    if problem_id != MPMapper.problem_id:
+        #print(f"Fetching problem {problem_id} from namespace")
+        # Problem is pickled using dill when it is available
+        try:
+            import dill
+            MPMapper.problem = dill.loads(MPMapper.namespace.pickled_problem)
+        except ImportError:
+            MPMapper.problem = MPMapper.namespace.problem
+        MPMapper.problem_id = problem_id
+    return MPMapper.problem.nllf(point)
+
+def _MP_calc_qprofile(problem_point_pair):
+    # given a problem and a sample draw and a Q-vector, calculate the profiles associated with each sample
+    problem_id, point = problem_point_pair
+    if problem_id != MPMapper.problem_id:
+        #print(f"Fetching problem {problem_id} from namespace")
+        # Problem is pickled using dill when it is available
+        try:
+            import dill
+            MPMapper.problem = dill.loads(MPMapper.namespace.pickled_problem)
+        except ImportError:
+            MPMapper.problem = MPMapper.namespace.problem
+        MPMapper.problem_id = problem_id
+    return _calc_qprofile(MPMapper.problem, point)
+
+def _calc_qprofile(calcproblem, point):
+    mlist = [calcproblem] if hasattr(calcproblem, 'fitness') else list(calcproblem.models)
+    newvars = [gen_new_variables(Q) for Q in calcproblem.calcQs]
+    qprof = list()
+    Qbkg = list()
+    for m, newvar in zip(mlist, newvars):
+        calcproblem.setp(point)
+        calcproblem.chisq_str()
+        Rth = calc_expected_R(m.fitness, *newvar, oversampling=calcproblem.oversampling)
+        qprof.append(Rth)
+        Qbkg.append(m.fitness.probe.background.value)
+
+    return qprof, Qbkg
+
+
+class MPMapper(object):
+    # Note: suprocesses are using the same variables
+    pool = None
+    manager = None
+    namespace = None
+    problem_id = 0
+
+    @staticmethod
+    def start_worker(problem):
+        pass
+
+
+    @staticmethod
+    def start_mapper(problem, modelargs, cpus=0):
+        import multiprocessing
+
+        # Set up the process pool on the first call.
+        if MPMapper.pool is None:
+            # Create a sync namespace to distribute the problem description.
+            MPMapper.manager = multiprocessing.Manager()
+            MPMapper.namespace = MPMapper.manager.Namespace()
+            # Start the process pool, sending the namespace handle
+            if cpus == 0:
+                cpus = multiprocessing.cpu_count()
+            MPMapper.pool = multiprocessing.Pool(cpus, _MP_setup, (MPMapper.namespace,))
+
+        # Increment the problem number and store the problem in the namespace.
+        # The store action uses pickle to transfer python objects to the
+        # manager process. Since this may fail for lambdas and for functions
+        # defined within the model file, instead use dill (if available)
+        # to pickle the problem before storing.
+        MPMapper.problem_id += 1
+        try:
+            import dill
+            MPMapper.namespace.pickled_problem = dill.dumps(problem, recurse=True)
+        except ImportError:
+            MPMapper.namespace.problem = problem
+        ## Store the modelargs and the problem name if pickling doesn't work
+        #MPMapper.namespace.modelargs = modelargs
+
+        # Set the mapper to send problem_id/point value pairs
+        mapper = lambda points: MPMapper.pool.map(
+            _MP_run_problem, ((MPMapper.problem_id, p) for p in points))
+
+        mappercalc = lambda points: MPMapper.pool.map(
+            _MP_calc_qprofile, ((MPMapper.problem_id, p) for p in points))
+
+        return mapper, mappercalc
+
+
+    @staticmethod
+    def stop_mapper(mapper):
+        MPMapper.pool.terminate()
