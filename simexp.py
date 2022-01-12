@@ -1,17 +1,18 @@
 import numpy as np
 import copy
 import time
-from bumps.cli import load_model, load_best
+import dill
+#from bumps.cli import load_model, load_best
 from bumps.fitters import DreamFit, ConsoleMonitor, _fill_defaults, StepMonitor
 from bumps.initpop import generate
-from bumps.dream.state import load_state
-from refl1d.names import FitProblem, Experiment
+#from bumps.dream.state import load_state
+#from refl1d.names import FitProblem, Experiment
 from refl1d.resolution import TL2Q, dTdL2dQ
 import matplotlib.pyplot as plt
 from matplotlib import cm, colors
-from bumps.mapper import can_pickle, SerialMapper
+#from bumps.mapper import can_pickle, SerialMapper
 from sklearn.linear_model import LinearRegression
-from scipy.stats import poisson
+#from scipy.stats import poisson
 import autorefl as ar
 
 def magik_intensity(Q, modelnum=None):
@@ -71,10 +72,13 @@ class ExperimentStep(object):
         else:
             return []
 
+    def meastime(self):
+        return sum([pt.t for pt in self.points])
+
 
 class SimReflExperiment(object):
 
-    def __init__(self, problem, Q, f_intensity=magik_intensity, bestpars=None, fit_options={'pop': 10}, oversampling=11, bkg=1e-6, startmodel=0, min_meas_time=10, select_pars=None) -> None:
+    def __init__(self, problem, Q, f_intensity=magik_intensity, bestpars=None, fit_options=None, oversampling=11, bkg=1e-6, startmodel=0, min_meas_time=10, select_pars=None) -> None:
         # running list of options: oversampling, background x nmodels, minQ, maxQ, fit_options, startmodel, wavelength
         # more options: eta, npoints, (nrepeats not necessary because multiple objects can be made and run), switch_penalty, min_meas_time
         # problem is the FitProblem object to simulate
@@ -87,7 +91,7 @@ class SimReflExperiment(object):
         self.eta = 0.8
         self.npoints = int(1.0)
         self.switch_penalty = 1.0
-        self.min_meas_time = 10.0
+        self.min_meas_time = min_meas_time
 
         # Initialize
         self.problem = problem
@@ -138,14 +142,6 @@ class SimReflExperiment(object):
         self.init_entropy = ar.calc_init_entropy(problem)
         self.init_entropy_marg = ar.calc_init_entropy(problem, select_pars=select_pars)
 
-        # generate initial data set. This is only necessary because of the requirement that dof > 0
-        # in Refl1D (probably not required for DREAM fit)
-        nQs = [((self.npars + 1) // self.nmodels) + 1 if i < ((self.npars + 1) % self.nmodels) else ((self.npars + 1) // self.nmodels) for i in range(self.nmodels)]
-        self.newQs = [np.linspace(min(Qvec), max(Qvec), nQ) for nQ, Qvec in zip(nQs, self.measQ)]
-        self.new_meastimes = [np.zeros_like(newQ) for newQ in self.newQs]
-        self.newfoms = [np.zeros_like(newQ) for newQ in self.newQs]
-        self.initQs = copy.deepcopy(self.newQs)
-
         self.steps = []
         self.restart_pop = None
 
@@ -170,14 +166,27 @@ class SimReflExperiment(object):
         # returns all data of type "attr" for a specific model
         return [getattr(pt, attr) for pt in self.get_all_points(modelnum)]
 
+    def compile_datapoints(self, Qbasis, points):
+
+        idata = [[getattr(pt, attr) for pt in points] for attr in self.attr_list]
+
+        return ar.compile_data_N(copy.copy(Qbasis), *idata)
+
     def add_initial_step(self, dRoR=10.0):
-        
+
+        # generate initial data set. This is only necessary because of the requirement that dof > 0
+        # in Refl1D (probably not strictly required for DREAM fit)
+        nQs = [((self.npars + 1) // self.nmodels) + 1 if i < ((self.npars + 1) % self.nmodels) else ((self.npars + 1) // self.nmodels) for i in range(self.nmodels)]
+        newQs = [np.linspace(min(Qvec), max(Qvec), nQ) for nQ, Qvec in zip(nQs, self.measQ)]
+        new_meastimes = [np.zeros_like(newQ) for newQ in newQs]
+        newfoms = [np.zeros_like(newQ) for newQ in newQs]
+
         initpts = generate(self.problem, init='lhs', pop=self.fit_options['pop'], use_point=False)
         init_qprof, _ = ar.calc_qprofiles(self.problem, initpts, self.newQs)
     
         points = []
 
-        for mnum, (newQ, mtime, mfom, qprof, bkg) in enumerate(zip(self.newQs, self.new_meastimes, self.newfoms, init_qprof, self.bkg)):
+        for mnum, (newQ, mtime, mfom, qprof, bkg) in enumerate(zip(newQs, new_meastimes, newfoms, init_qprof, self.bkg)):
             newR, newdR = np.mean(qprof, axis=0), dRoR * np.std(qprof, axis=0)
             targetN = (newR / newdR) ** 2
             target_incident_neutrons = targetN / newR
@@ -196,8 +205,7 @@ class SimReflExperiment(object):
     def update_models(self):
 
         for i, (m, measQ) in enumerate(zip(self.models, self.measQ)):
-            idata = [self.getdata(attr, i) for attr in self.attr_list]
-            mT, mdT, mL, mdL, mR, mdR, mQ, mdQ = ar.compile_data_N(copy.copy(measQ), *idata)
+            mT, mdT, mL, mdL, mR, mdR, mQ, mdQ = self.compile_datapoints(measQ, self.get_all_points(i))
             m.fitness.probe._set_TLR(mT, mdT, mL, mdL, mR, mdR, dQ=None)
             m.fitness.probe.oversample(self.oversampling)
             m.fitness.update()
@@ -205,9 +213,9 @@ class SimReflExperiment(object):
         self.problem.model_reset()
         self.problem.chisq_str()
 
-    def calc_qprofiles(self, drawpoints):
+    def calc_qprofiles(self, drawpoints, mappercalc):
         # this version is limited to calculating profiles with measQ, cannot be used with initial calculation
-        res = self.mappercalc(drawpoints)
+        res = mappercalc(drawpoints)
 
         qprofs = list()
         qbkgs = list()
@@ -218,9 +226,14 @@ class SimReflExperiment(object):
         return qprofs, qbkgs
 
     def fit_step(self, outfid=None):
-        """Adds and executes a new step"""
+        """Analyzes most recent step"""
         
         self.update_models()
+
+        setattr(self.problem, 'calcQs', self.measQ)
+        setattr(self.problem, 'oversampling', self.oversampling)
+
+        mapper, mappercalc = ar.MPMapper.start_mapper(self.problem, None, cpus=0)
 
         if outfid is not None:
             monitor = StepMonitor(self.problem, outfid)
@@ -228,7 +241,7 @@ class SimReflExperiment(object):
             monitor = ConsoleMonitor(self.problem)
         fitter = ar.DreamFitPlus(self.problem)
         options=_fill_defaults(self.fit_options, fitter.settings)
-        result = fitter.solve(mapper=self.mapper, monitors=[monitor], initial_population=self.restart_pop, **options)
+        result = fitter.solve(mapper=mapper, monitors=[monitor], initial_population=self.restart_pop, **options)
 
         _, chains, _ = fitter.state.chains()
         self.restart_pop = chains[-1, : ,:]
@@ -247,11 +260,18 @@ class SimReflExperiment(object):
         step.H_marg = ar.calc_entropy(step.draw.points, select_pars=self.sel)
         step.dH_marg = self.init_entropy_marg - step.H_marg
 
-    def analyze_step(self):
+        print('Calculating %i Q profiles:' % (step.draw.points.shape[0]))
+        init_time = time.time()
+        step.qprofs, step.qbkgs = self.calc_qprofiles(step.draw.points, mappercalc)
+        print('Calculation time: %f' % (time.time() - init_time))
+
+        ar.MPMapper.stop_mapper(mapper)
+        ar.MPMapper.pool = None
+
+    def take_step(self):
 
         step = self.steps[-1]
         
-        step.qprofs, step.qbkgs = self.calc_qprofiles(step.draw.points)
         step.foms, step.meastimes = self.calc_foms(step)
 
         points = []
@@ -270,7 +290,7 @@ class SimReflExperiment(object):
             else:
                 break
 
-        return points
+        self.add_step(points)
 
     def add_step(self, points, use=True):
 
@@ -352,13 +372,14 @@ class SimReflExperiment(object):
         if len(top_n):
 
             # generate a DataPoint object with the maximum point
-            maxfom, mnum, idx = top_n
+            _, mnum, idx = top_n
+            maxfom = step.foms[mnum][idx]       # use unscaled version for plotting
             newQ = self.measQ[mnum][idx]
             new_meastime = max(step.meastimes[mnum][idx], self.min_meas_time)
 
             newvars = ar.gen_new_variables(newQ)
             calcR = ar.calc_expected_R(self.calcmodels[mnum].fitness, *newvars, oversampling=self.oversampling)
-            print('expected R:', calcR)
+            #print('expected R:', calcR)
             incident_neutrons = self.intensity(newQ, modelnum=mnum) * new_meastime
             N, Nbkg, Ninc = ar.sim_data_N(calcR, incident_neutrons, background=self.bkg[mnum])
             #print(newR, target_incident_neutrons, N, Nbkg, Ninc)
@@ -374,14 +395,87 @@ class SimReflExperiment(object):
 
             return None
 
+    def save(self, fn):
+
+        with open(fn, 'wb') as f:
+            dill.dump(self, f, recurse=True)
+
+    @classmethod
+    def load(cls, fn):
+
+        with open(fn, 'rb') as f:
+            return dill.load(f)
+
+def makemovie(exp, outfilename, fps=1, fmt='gif', power=4):
+    import autorefl as ar
+    """ Makes a GIF or MP4 movie from a SimReflExperiment object"""
+
+    allt = np.cumsum([step.meastime() for step in exp.steps[:-1]])
+    allH = [step.dH for step in exp.steps[:-1]]
+    allH_marg = [step.dH_marg for step in exp.steps[:-1]]
+
+    total_t = 0.0
+    steptimes = np.zeros(exp.nmodels)
+    fig = plt.figure(figsize=(8 + 4 * exp.nmodels, 8))
+    gsright = GridSpec(2, exp.nmodels + 1, hspace=0, wspace=0.4)
+    gsleft = GridSpec(2, exp.nmodels + 1, hspace=0, wspace=0)
+    frames = list()
+    for j, step in enumerate(exp.steps[0:-1]):
+        #axtops, axbots = fig.subplots(2, exp.nmodels + 1, squeeze=False)
+        axtopright = fig.add_subplot(gsright[0,-1])
+        axbotright = fig.add_subplot(gsright[1,-1], sharex=axtopright)
+        axtopright.plot(allt, allH_marg, 'o-')
+        axbotright.plot(allt, allH, 'o-')
+        axtopright.plot(allt[j], allH_marg[j], 'o', markersize=15, color='red', alpha=0.4)
+        axbotright.plot(allt[j], allH[j], 'o', markersize=15, color='red', alpha=0.4)
+        axbotright.set_xlabel('Time (s)')
+        axbotright.set_ylabel(r'$\Delta H_{marg}$ (nats)')
+        axtopright.set_ylabel(r'$\Delta H_{total}$ (nats)')
+
+        axtops = [fig.add_subplot(gsleft[0, i]) for i in range(exp.nmodels)]
+        axbots = [fig.add_subplot(gsleft[1, i]) for i in range(exp.nmodels)]
+
+        for axtop, axbot in zip(axtops, axbots):
+            axtop.sharex(axbot)
+            axtop.sharey(axtops[0])
+            axbot.sharey(axbots[0])
+            axbot.set_xlabel(r'$Q_z$ (' + u'\u212b' + r'$^{-1}$)')
+            axtop.tick_params(labelleft=False, top=True, bottom=True, left=True, right=True, direction='in')
+            axbot.tick_params(labelleft=False, top=True, bottom=True, left=True, right=True, direction='in')
+
+        axtops[0].set_ylabel(r'$R \times Q_z^%i$ (' % power + u'\u212b' + r'$^{-4}$)')
+        axbots[0].set_ylabel('figure of merit')
+        axtops[0].tick_params(labelleft=True)
+        axbots[0].tick_params(labelleft=True)
 
 
+        total_t += step.meastime()
+        #print(np.array(step.qprofs).shape, step.draw.logp.shape)
+        allnewpoints = exp.steps[j+1].points
+        for i, (measQ, qprof, fom, axtop, axbot) in enumerate(zip(exp.measQ, step.qprofs, step.foms, axtops, axbots)):
+            steptimes[i] += sum(step.getdata('t', i))
+            plotpoints = [pt for step in exp.steps[:(j+1)] if step.use for pt in step.points if pt.model == i]
+            #print(*[[getattr(pt, attr) for pt in plotpoints] for attr in exp.attr_list])
+            idata = [[getattr(pt, attr) for pt in plotpoints] for attr in exp.attr_list]
+            ar.plot_qprofiles(copy.copy(measQ), qprof, step.draw.logp, data=idata, ax=axtop, power=power)
+            axtop.set_title('t = %0.0f s' % steptimes[i], fontsize='larger')
+            axbot.semilogy(measQ, fom, linewidth=3, color='C0')
+            newpoints = [pt for pt in exp.steps[j+1].points if pt.model == i]
+            for newpt in newpoints:
+                axbot.plot(newpt.Q(), newpt.merit, 'o', alpha=0.5, markersize=12, color='C1')
+            ##axbot.set_xlabel(axtop.get_xlabel())
+            ##axbot.set_ylabel('figure of merit')
+        fig.suptitle('t = %0.0f s' % total_t, fontsize='larger', fontweight='bold')
+        #fig.tight_layout()
+        fig.canvas.draw()
+        image = np.frombuffer(fig.canvas.tostring_rgb(), dtype='uint8')
+        image  = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+        frames.append(image)
+        fig.clf()
 
-
-
-
-
-
-
-
-
+    if format == 'gif':
+        import imageio
+        imageio.mimsave(outfilename + '.' + fmt, frames, fps=fps)
+    elif format == 'mp4':
+        import skvideo.io
+        skvideo.io.vwrite(outfilename + '.' + fmt, frames, outputdict={'-r': '%0.1f' % fps, '-crf': '20', '-profile:v': 'baseline', '-level': '3.0', '-pix_fmt': 'yuv420p'})
