@@ -414,7 +414,7 @@ class SimReflExperiment(object):
         with open(fn, 'rb') as f:
             return dill.load(f)
 
-def makemovie(exp, outfilename, fps=1, fmt='gif', power=4):
+def makemovie(exp, outfilename, fps=1, fmt='gif', power=4, tscale='log'):
     import autorefl as ar
     """ Makes a GIF or MP4 movie from a SimReflExperiment object"""
 
@@ -437,8 +437,10 @@ def makemovie(exp, outfilename, fps=1, fmt='gif', power=4):
         axtopright.plot(allt[j], allH_marg[j], 'o', markersize=15, color='red', alpha=0.4)
         axbotright.plot(allt[j], allH[j], 'o', markersize=15, color='red', alpha=0.4)
         axbotright.set_xlabel('Time (s)')
-        axbotright.set_ylabel(r'$\Delta H_{marg}$ (nats)')
-        axtopright.set_ylabel(r'$\Delta H_{total}$ (nats)')
+        axbotright.set_ylabel(r'$\Delta H_{total}$ (nats)')
+        axtopright.set_ylabel(r'$\Delta H_{marg}$ (nats)')
+        tscale = tscale if tscale in ['linear', 'log'] else 'log'
+        axbotright.yscale(tscale)
 
         axtops = [fig.add_subplot(gsleft[0, i]) for i in range(exp.nmodels)]
         axbots = [fig.add_subplot(gsleft[1, i]) for i in range(exp.nmodels)]
