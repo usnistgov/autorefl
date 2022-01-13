@@ -119,13 +119,20 @@ class SimReflExperiment(object):
         self.L = 5.0
         self.dL = 0.01648374 * self.L
 
-        if len(Q.shape) == 1:
-            self.measQ = np.broadcast_to(Q, (self.nmodels, len(Q)))
-        elif len(Q.shape) == 2:
-            assert (Q.shape[0]==self.nmodels), "Q array must be a single vector or have first dimension equal to the number of models in problem"
-            self.measQ = Q
+        if isinstance(Q, np.ndarray):
+            if len(Q.shape) == 1:
+                self.measQ = np.broadcast_to(Q, (self.nmodels, len(Q)))
+            elif len(Q.shape) == 2:
+                assert (Q.shape[0]==self.nmodels), "Q array must be a single vector or have first dimension equal to the number of models in problem"
+                self.measQ = Q
+            else:
+                raise Exception('Bad Q shape')
         else:
-            raise Exception('Bad Q shape')
+            if any(isinstance(i, (list, np.ndarray)) for i in Q): # is a nested list
+                assert (len(Q) == self.nmodels), "Q array must be a single vector or a list of vectors with length equal to the number of models in problem"
+                self.measQ = Q
+            else:
+                self.measQ = [Q for _ in range(self.nmodels)]
 
         self.npars = len(problem.getp())
         self.orgQ = [list(m.fitness.probe.Q) for m in models]
@@ -416,6 +423,42 @@ class SimReflExperiment(object):
 
         with open(fn, 'rb') as f:
             return dill.load(f)
+
+class SimReflExperimentControl(SimReflExperiment):
+
+    def __init__(self, problem, Q, model_weights=None, f_intensity=magik_intensity, eta=0.8, npoints=1, switch_penalty=1, bestpars=None, fit_options=fit_options, oversampling=11, bkg=0.000001, startmodel=0, min_meas_time=10, select_pars=None) -> None:
+        super().__init__(problem, Q, f_intensity=f_intensity, eta=eta, npoints=npoints, switch_penalty=switch_penalty, bestpars=bestpars, fit_options=fit_options, oversampling=oversampling, bkg=bkg, startmodel=startmodel, min_meas_time=min_meas_time, select_pars=select_pars)
+
+        if model_weights is None:
+            model_weights = np.ones(self.nmodels)
+        else:
+            assert (len(model_weights) == self.nmodels), "weights must have same length as number of models"
+        
+        model_weights = np.array(model_weights) / np.sum(model_weights)
+
+        self.meastimeweights = list()
+        for Q, weight in zip(self.measQ, model_weights):
+            self.meastimeweights.append(weight * np.array(Q)**2 / np.sum(np.array(Q)**2))
+
+    def take_step(self, total_time):
+        points = list()
+        #TODO: Make this into a (Q to points) function
+        for mnum, (newQ, mtimeweight, bkg) in enumerate(zip(self.measQ, self.meastimeweights, self.bkg)):
+            newvars = ar.gen_new_variables(newQ)
+            calcR = ar.calc_expected_R(self.calcmodels[mnum].fitness, *newvars, oversampling=self.oversampling)
+            #print('expected R:', calcR)
+            incident_neutrons = self.intensity(newQ, modelnum=mnum) * total_time * mtimeweight
+            Ns, Nbkgs, Nincs = ar.sim_data_N(calcR, incident_neutrons, background=bkg)
+            #print(newR, target_incident_neutrons, Ns, Nbkgs, Nincs)
+            Ts = ar.q2a(newQ, self.L)
+            # TODO: Replace with resolution function
+            dTs = np.polyval(np.array([ 2.30358547e-01, -1.18046955e-05]), newQ)
+            Ls = np.ones_like(newQ)*self.L
+            dLs = np.ones_like(newQ)*self.dL
+            for t, T, dT, L, dL, N, Nbkg, Ninc in zip(total_time * mtimeweight, Ts, dTs, Ls, dLs, Ns, Nbkgs, Nincs):
+                points.append(DataPoint(t, mnum, (T, dT, L, dL, N, Nbkg, Ninc)))
+        
+        self.add_step(points)
 
 def snapshot(exp, stepnumber, fig=None, power=4, tscale='log'):
 
