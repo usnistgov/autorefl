@@ -13,9 +13,6 @@ from matplotlib import cm, colors
 from bumps.mapper import MPMapper, can_pickle, SerialMapper
 from sklearn.linear_model import LinearRegression
 from scipy.stats import poisson
-import msgpack
-import msgpack_numpy
-msgpack_numpy.patch()
 
 d_intens = np.loadtxt('magik_intensity_hw106.refl')
 
