@@ -79,8 +79,11 @@ class ExperimentStep(object):
         else:
             return []
 
-    def meastime(self):
-        return sum([pt.t for pt in self.points])
+    def meastime(self, modelnum=None):
+        if modelnum is None:
+            return sum([pt.t for pt in self.points])
+        else:
+            return sum([pt.t for pt in self.points if pt.model == modelnum])
 
 
 class SimReflExperiment(object):
@@ -414,73 +417,83 @@ class SimReflExperiment(object):
         with open(fn, 'rb') as f:
             return dill.load(f)
 
-def makemovie(exp, outfilename, fps=1, fmt='gif', power=4, tscale='log'):
-    import autorefl as ar
-    """ Makes a GIF or MP4 movie from a SimReflExperiment object"""
+def snapshot(exp, stepnumber, fig=None, power=4, tscale='log'):
 
     allt = np.cumsum([step.meastime() for step in exp.steps[:-1]])
     allH = [step.dH for step in exp.steps[:-1]]
     allH_marg = [step.dH_marg for step in exp.steps[:-1]]
 
-    total_t = 0.0
-    steptimes = np.zeros(exp.nmodels)
-    fig = plt.figure(figsize=(8 + 4 * exp.nmodels, 8))
+    if fig is None:
+        fig = plt.figure(figsize=(8 + 4 * exp.nmodels, 8))
     gsright = GridSpec(2, exp.nmodels + 1, hspace=0, wspace=0.4)
     gsleft = GridSpec(2, exp.nmodels + 1, hspace=0, wspace=0)
-    frames = list()
-    for j, step in enumerate(exp.steps[0:-1]):
-        #axtops, axbots = fig.subplots(2, exp.nmodels + 1, squeeze=False)
-        axtopright = fig.add_subplot(gsright[0,-1])
-        axbotright = fig.add_subplot(gsright[1,-1], sharex=axtopright)
-        axtopright.plot(allt, allH_marg, 'o-')
-        axbotright.plot(allt, allH, 'o-')
-        axtopright.plot(allt[j], allH_marg[j], 'o', markersize=15, color='red', alpha=0.4)
-        axbotright.plot(allt[j], allH[j], 'o', markersize=15, color='red', alpha=0.4)
-        axbotright.set_xlabel('Time (s)')
-        axbotright.set_ylabel(r'$\Delta H_{total}$ (nats)')
-        axtopright.set_ylabel(r'$\Delta H_{marg}$ (nats)')
-        tscale = tscale if tscale in ['linear', 'log'] else 'log'
-        axbotright.yscale(tscale)
+    j = stepnumber
+    step = exp.steps[j]
 
-        axtops = [fig.add_subplot(gsleft[0, i]) for i in range(exp.nmodels)]
-        axbots = [fig.add_subplot(gsleft[1, i]) for i in range(exp.nmodels)]
+    steptimes = [sum([step.meastime(modelnum=i) for step in exp.steps[:(j+1)]]) for i in range(exp.nmodels)]
 
-        total_t += step.meastime()
-        #print(np.array(step.qprofs).shape, step.draw.logp.shape)
-        allnewpoints = exp.steps[j+1].points
-        for i, (measQ, qprof, fom, axtop, axbot) in enumerate(zip(exp.measQ, step.qprofs, step.foms, axtops, axbots)):
-            steptimes[i] += sum(step.getdata('t', i))
-            plotpoints = [pt for step in exp.steps[:(j+1)] if step.use for pt in step.points if pt.model == i]
-            #print(*[[getattr(pt, attr) for pt in plotpoints] for attr in exp.attr_list])
-            idata = [[getattr(pt, attr) for pt in plotpoints] for attr in exp.attr_list]
-            ar.plot_qprofiles(copy.copy(measQ), qprof, step.draw.logp, data=idata, ax=axtop, power=power)
-            axtop.set_title('t = %0.0f s' % steptimes[i], fontsize='larger')
-            axbot.semilogy(measQ, fom, linewidth=3, color='C0')
+    axtopright = fig.add_subplot(gsright[0,-1])
+    axbotright = fig.add_subplot(gsright[1,-1], sharex=axtopright)
+    axtopright.plot(allt, allH_marg, 'o-')
+    axbotright.plot(allt, allH, 'o-')
+    axtopright.plot(allt[j], allH_marg[j], 'o', markersize=15, color='red', alpha=0.4)
+    axbotright.plot(allt[j], allH[j], 'o', markersize=15, color='red', alpha=0.4)
+    axbotright.set_xlabel('Time (s)')
+    axbotright.set_ylabel(r'$\Delta H_{total}$ (nats)')
+    axtopright.set_ylabel(r'$\Delta H_{marg}$ (nats)')
+    tscale = tscale if tscale in ['linear', 'log'] else 'log'
+    axbotright.yscale(tscale)
+
+    axtops = [fig.add_subplot(gsleft[0, i]) for i in range(exp.nmodels)]
+    axbots = [fig.add_subplot(gsleft[1, i]) for i in range(exp.nmodels)]
+
+    #print(np.array(step.qprofs).shape, step.draw.logp.shape)
+    for i, (measQ, qprof, fom, axtop, axbot) in enumerate(zip(exp.measQ, step.qprofs, step.foms, axtops, axbots)):
+        plotpoints = [pt for step in exp.steps[:(j+1)] if step.use for pt in step.points if pt.model == i]
+        #print(*[[getattr(pt, attr) for pt in plotpoints] for attr in exp.attr_list])
+        idata = [[getattr(pt, attr) for pt in plotpoints] for attr in exp.attr_list]
+        ar.plot_qprofiles(copy.copy(measQ), qprof, step.draw.logp, data=idata, ax=axtop, power=power)
+        axtop.set_title('t = %0.0f s' % steptimes[i], fontsize='larger')
+        axbot.semilogy(measQ, fom, linewidth=3, color='C0')
+        if (j + 1) < len(exp.steps):
             newpoints = [pt for pt in exp.steps[j+1].points if pt.model == i]
             for newpt in newpoints:
                 axbot.plot(newpt.Q(), newpt.merit, 'o', alpha=0.5, markersize=12, color='C1')
-            ##axbot.set_xlabel(axtop.get_xlabel())
-            ##axbot.set_ylabel('figure of merit')
+        ##axbot.set_xlabel(axtop.get_xlabel())
+        ##axbot.set_ylabel('figure of merit')
 
-        all_top_ylims = [axtop.get_ylim() for axtop in axtops]
-        new_ylims = [min([ylim[0] for ylim in all_top_ylims]), max([ylim[1] for ylim in all_top_ylims])]
+    all_top_ylims = [axtop.get_ylim() for axtop in axtops]
+    new_ylims = [min([ylim[0] for ylim in all_top_ylims]), max([ylim[1] for ylim in all_top_ylims])]
 
-        for axtop, axbot in zip(axtops, axbots):
-            axtop.sharex(axbot)
-            axtop.sharey(axtops[0])
-            axbot.sharey(axbots[0])
-            axbot.set_xlabel(r'$Q_z$ (' + u'\u212b' + r'$^{-1}$)')
-            axtop.tick_params(labelleft=False, labelbottom=False, top=True, bottom=True, left=True, right=True, direction='in')
-            axbot.tick_params(labelleft=False, top=True, bottom=True, left=True, right=True, direction='in')
+    for axtop, axbot in zip(axtops, axbots):
+        axtop.sharex(axbot)
+        axtop.sharey(axtops[0])
+        axbot.sharey(axbots[0])
+        axbot.set_xlabel(r'$Q_z$ (' + u'\u212b' + r'$^{-1}$)')
+        axtop.tick_params(labelleft=False, labelbottom=False, top=True, bottom=True, left=True, right=True, direction='in')
+        axbot.tick_params(labelleft=False, top=True, bottom=True, left=True, right=True, direction='in')
 
-        axtops[0].set_ylim(new_ylims)
-        axtops[0].set_ylabel(r'$R \times Q_z^%i$ (' % power + u'\u212b' + r'$^{-4}$)')
-        axbots[0].set_ylabel('figure of merit')
-        axtops[0].tick_params(labelleft=True)
-        axbots[0].tick_params(labelleft=True)
+    axtops[0].set_ylim(new_ylims)
+    axtops[0].set_ylabel(r'$R \times Q_z^%i$ (' % power + u'\u212b' + r'$^{-4}$)')
+    axbots[0].set_ylabel('figure of merit')
+    axtops[0].tick_params(labelleft=True)
+    axbots[0].tick_params(labelleft=True)
 
-        fig.suptitle('t = %0.0f s' % total_t, fontsize='larger', fontweight='bold')
-        #fig.tight_layout()
+    fig.suptitle('t = %0.0f s' % sum(steptimes), fontsize='larger', fontweight='bold')
+
+    return fig, (axtops, axbots, axtopright, axbotright)
+
+def makemovie(exp, outfilename, fps=1, fmt='gif', power=4, tscale='log'):
+    """ Makes a GIF or MP4 movie from a SimReflExperiment object"""
+
+    fig = plt.figure(figsize=(8 + 4 * exp.nmodels, 8))
+
+    frames = list()
+
+    for j in range(len(exp.steps[0:-1])):
+
+        fig, axs = snapshot(exp, j, fig=fig, power=power, tscale=tscale)
+
         fig.canvas.draw()
         image = np.frombuffer(fig.canvas.tostring_rgb(), dtype='uint8')
         image  = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
