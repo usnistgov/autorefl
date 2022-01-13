@@ -79,6 +79,10 @@ if __name__ == '__main__':
             exp.save(pathname + '/exp%i.pickle' % kk)
             k += 1
 
-        makemovie(exp, pathname + '/exp%i.gif' % kk, fmt='gif')
+        try:
+            makemovie(exp, pathname + '/exp%i' % kk, fmt='gif')
+        except RuntimeError:
+            plt.switch_backend('agg')
+            makemovie(exp, pathname + '/exp%i' % kk, fmt='gif')
 
 
