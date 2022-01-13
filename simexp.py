@@ -38,7 +38,7 @@ class DataPoint(object):
 
     def __repr__(self):
         # TODO: fix this for multiple data points
-        return 'Q: %0.4f Ang^-1\tTime: %0.1f s' % (self.Q(), self.t)
+        return 'Model: %i\tQ: %0.4f Ang^-1\tTime: %0.1f s' % (self.model, self.Q(), self.t)
 
     @property
     def data(self):
