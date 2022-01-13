@@ -442,7 +442,7 @@ def snapshot(exp, stepnumber, fig=None, power=4, tscale='log'):
     axbotright.set_ylabel(r'$\Delta H_{total}$ (nats)')
     axtopright.set_ylabel(r'$\Delta H_{marg}$ (nats)')
     tscale = tscale if tscale in ['linear', 'log'] else 'log'
-    axbotright.yscale(tscale)
+    axbotright.set_xscale(tscale)
 
     axtops = [fig.add_subplot(gsleft[0, i]) for i in range(exp.nmodels)]
     axbots = [fig.add_subplot(gsleft[1, i]) for i in range(exp.nmodels)]
@@ -463,7 +463,9 @@ def snapshot(exp, stepnumber, fig=None, power=4, tscale='log'):
         ##axbot.set_ylabel('figure of merit')
 
     all_top_ylims = [axtop.get_ylim() for axtop in axtops]
-    new_ylims = [min([ylim[0] for ylim in all_top_ylims]), max([ylim[1] for ylim in all_top_ylims])]
+    new_top_ylims = [min([ylim[0] for ylim in all_top_ylims]), max([ylim[1] for ylim in all_top_ylims])]
+    all_bot_ylims = [axbot.get_ylim() for axbot in axbots]
+    new_bot_ylims = [min([ylim[0] for ylim in all_bot_ylims]), max([ylim[1] for ylim in all_bot_ylims])]
 
     for axtop, axbot in zip(axtops, axbots):
         axtop.sharex(axbot)
@@ -473,7 +475,8 @@ def snapshot(exp, stepnumber, fig=None, power=4, tscale='log'):
         axtop.tick_params(labelleft=False, labelbottom=False, top=True, bottom=True, left=True, right=True, direction='in')
         axbot.tick_params(labelleft=False, top=True, bottom=True, left=True, right=True, direction='in')
 
-    axtops[0].set_ylim(new_ylims)
+    axtops[0].set_ylim(new_top_ylims)
+    axbots[0].set_ylim(new_bot_ylims)
     axtops[0].set_ylabel(r'$R \times Q_z^%i$ (' % power + u'\u212b' + r'$^{-4}$)')
     axbots[0].set_ylabel('figure of merit')
     axtops[0].tick_params(labelleft=True)
@@ -492,12 +495,12 @@ def makemovie(exp, outfilename, fps=1, fmt='gif', power=4, tscale='log'):
 
     for j in range(len(exp.steps[0:-1])):
 
-        fig, axs = snapshot(exp, j, fig=fig, power=power, tscale=tscale)
-
+        fig, (axtops, axbots, axtopright, axbotright) = snapshot(exp, j, fig=fig, power=power, tscale=tscale)
         fig.canvas.draw()
         image = np.frombuffer(fig.canvas.tostring_rgb(), dtype='uint8')
         image  = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
         frames.append(image)
+        axbotright.set_xscale('linear')
         fig.clf()
 
     if fmt == 'gif':
