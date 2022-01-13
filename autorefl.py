@@ -590,34 +590,3 @@ class MPMapper(object):
     @staticmethod
     def stop_mapper(mapper):
         MPMapper.pool.terminate()
-
-
-# =========== use msgpack to save steps to be reloaded later ================
-
-def save_steps(steps, outfile):
-
-    steps = copy.deepcopy(steps)
-
-    for step in steps:
-        step.points = [pt.__dict__ for pt in step.points]
-        step = step.__dict__
-
-    with open(outfile, 'wb') as h:
-        packed = msgpack.packb(steps)
-        outfile.write(packed)
-
-def load_steps(infile):
-
-    with open(infile, 'rb') as data_file:
-        byte_data = data_file.read()
-
-    data = msgpack.unpackb(byte_data)
-    dpts = [ExperimentStep([]) for _ in range(len(data))]
-    for dpt, step in zip(dpts, data):
-        pt = [DataPoint(0,0,([],[],[],[],[],[],[])) for _ in range(len(step['points']))]
-        for p, pdict in zip(pt, step['points']):
-            p.__dict__.update(pdict)
-
-        dpt.__dict__.update(step)
-
-    return dpts

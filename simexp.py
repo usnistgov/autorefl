@@ -10,10 +10,13 @@ from bumps.initpop import generate
 from refl1d.resolution import TL2Q, dTdL2dQ
 import matplotlib.pyplot as plt
 from matplotlib import cm, colors
+from matplotlib.gridspec import GridSpec
 #from bumps.mapper import can_pickle, SerialMapper
 from sklearn.linear_model import LinearRegression
 #from scipy.stats import poisson
 import autorefl as ar
+
+fit_options = {'pop': 10, 'burn': 1000, 'steps': 500, 'init': 'lhs', 'alpha': 0.001}
 
 def magik_intensity(Q, modelnum=None):
     # gives counts / second as a function of Q for MAGIK
@@ -32,6 +35,10 @@ class DataPoint(object):
         self.merit = merit
         self._data = None
         self.data = data
+
+    def __repr__(self):
+        # TODO: fix this for multiple data points
+        return 'Q: %0.4f Ang^-1\tTime: %0.1f s' % (self.Q(), self.t)
 
     @property
     def data(self):
@@ -78,7 +85,7 @@ class ExperimentStep(object):
 
 class SimReflExperiment(object):
 
-    def __init__(self, problem, Q, f_intensity=magik_intensity, bestpars=None, fit_options=None, oversampling=11, bkg=1e-6, startmodel=0, min_meas_time=10, select_pars=None) -> None:
+    def __init__(self, problem, Q, f_intensity=magik_intensity, eta=0.8, npoints=1, switch_penalty=1, bestpars=None, fit_options=fit_options, oversampling=11, bkg=1e-6, startmodel=0, min_meas_time=10, select_pars=None) -> None:
         # running list of options: oversampling, background x nmodels, minQ, maxQ, fit_options, startmodel, wavelength
         # more options: eta, npoints, (nrepeats not necessary because multiple objects can be made and run), switch_penalty, min_meas_time
         # problem is the FitProblem object to simulate
@@ -88,9 +95,9 @@ class SimReflExperiment(object):
         self.attr_list = ['T', 'dT', 'L', 'dL', 'N', 'Nbkg', 'Ninc']
 
         # Analysis options
-        self.eta = 0.8
-        self.npoints = int(1.0)
-        self.switch_penalty = 1.0
+        self.eta = eta
+        self.npoints = int(npoints)
+        self.switch_penalty = switch_penalty
         self.min_meas_time = min_meas_time
 
         # Initialize
@@ -182,7 +189,7 @@ class SimReflExperiment(object):
         newfoms = [np.zeros_like(newQ) for newQ in newQs]
 
         initpts = generate(self.problem, init='lhs', pop=self.fit_options['pop'], use_point=False)
-        init_qprof, _ = ar.calc_qprofiles(self.problem, initpts, self.newQs)
+        init_qprof, _ = ar.calc_qprofiles(self.problem, initpts, newQs)
     
         points = []
 
@@ -286,10 +293,11 @@ class SimReflExperiment(object):
             newpoint = self.select_new_point(step, start=i)
             if newpoint is not None:
                 points.append(newpoint)
+                print('New data point:\t' + repr(newpoint))
                 self.curmodel = newpoint.model
             else:
                 break
-
+        
         self.add_step(points)
 
     def add_step(self, points, use=True):
@@ -440,7 +448,7 @@ def makemovie(exp, outfilename, fps=1, fmt='gif', power=4):
             axtop.sharey(axtops[0])
             axbot.sharey(axbots[0])
             axbot.set_xlabel(r'$Q_z$ (' + u'\u212b' + r'$^{-1}$)')
-            axtop.tick_params(labelleft=False, top=True, bottom=True, left=True, right=True, direction='in')
+            axtop.tick_params(labelleft=False, labelbottom=False, top=True, bottom=True, left=True, right=True, direction='in')
             axbot.tick_params(labelleft=False, top=True, bottom=True, left=True, right=True, direction='in')
 
         axtops[0].set_ylabel(r'$R \times Q_z^%i$ (' % power + u'\u212b' + r'$^{-4}$)')
@@ -473,9 +481,9 @@ def makemovie(exp, outfilename, fps=1, fmt='gif', power=4):
         frames.append(image)
         fig.clf()
 
-    if format == 'gif':
+    if fmt == 'gif':
         import imageio
         imageio.mimsave(outfilename + '.' + fmt, frames, fps=fps)
-    elif format == 'mp4':
+    elif fmt == 'mp4':
         import skvideo.io
         skvideo.io.vwrite(outfilename + '.' + fmt, frames, outputdict={'-r': '%0.1f' % fps, '-crf': '20', '-profile:v': 'baseline', '-level': '3.0', '-pix_fmt': 'yuv420p'})
