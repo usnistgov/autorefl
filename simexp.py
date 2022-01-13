@@ -445,20 +445,6 @@ def makemovie(exp, outfilename, fps=1, fmt='gif', power=4, tscale='log'):
         axtops = [fig.add_subplot(gsleft[0, i]) for i in range(exp.nmodels)]
         axbots = [fig.add_subplot(gsleft[1, i]) for i in range(exp.nmodels)]
 
-        for axtop, axbot in zip(axtops, axbots):
-            axtop.sharex(axbot)
-            axtop.sharey(axtops[0])
-            axbot.sharey(axbots[0])
-            axbot.set_xlabel(r'$Q_z$ (' + u'\u212b' + r'$^{-1}$)')
-            axtop.tick_params(labelleft=False, labelbottom=False, top=True, bottom=True, left=True, right=True, direction='in')
-            axbot.tick_params(labelleft=False, top=True, bottom=True, left=True, right=True, direction='in')
-
-        axtops[0].set_ylabel(r'$R \times Q_z^%i$ (' % power + u'\u212b' + r'$^{-4}$)')
-        axbots[0].set_ylabel('figure of merit')
-        axtops[0].tick_params(labelleft=True)
-        axbots[0].tick_params(labelleft=True)
-
-
         total_t += step.meastime()
         #print(np.array(step.qprofs).shape, step.draw.logp.shape)
         allnewpoints = exp.steps[j+1].points
@@ -475,6 +461,24 @@ def makemovie(exp, outfilename, fps=1, fmt='gif', power=4, tscale='log'):
                 axbot.plot(newpt.Q(), newpt.merit, 'o', alpha=0.5, markersize=12, color='C1')
             ##axbot.set_xlabel(axtop.get_xlabel())
             ##axbot.set_ylabel('figure of merit')
+
+        all_top_ylims = [axtop.get_ylim() for axtop in axtops]
+        new_ylims = [min([ylim[0] for ylim in all_top_ylims]), max([ylim[1] for ylim in all_top_ylims])]
+
+        for axtop, axbot in zip(axtops, axbots):
+            axtop.sharex(axbot)
+            axtop.sharey(axtops[0])
+            axbot.sharey(axbots[0])
+            axbot.set_xlabel(r'$Q_z$ (' + u'\u212b' + r'$^{-1}$)')
+            axtop.tick_params(labelleft=False, labelbottom=False, top=True, bottom=True, left=True, right=True, direction='in')
+            axbot.tick_params(labelleft=False, top=True, bottom=True, left=True, right=True, direction='in')
+
+        axtops[0].set_ylim(new_ylims)
+        axtops[0].set_ylabel(r'$R \times Q_z^%i$ (' % power + u'\u212b' + r'$^{-4}$)')
+        axbots[0].set_ylabel('figure of merit')
+        axtops[0].tick_params(labelleft=True)
+        axbots[0].tick_params(labelleft=True)
+
         fig.suptitle('t = %0.0f s' % total_t, fontsize='larger', fontweight='bold')
         #fig.tight_layout()
         fig.canvas.draw()
