@@ -144,6 +144,8 @@ class SimReflExperiment(object):
         # deal with inherent measurement background
         if not isinstance(meas_bkg, (list, np.ndarray)):
             self.meas_bkg = np.full(self.nmodels, meas_bkg)
+        else:
+            self.meas_bkg = np.array(meas_bkg)
 
         # add residual background
         self.resid_bkg = np.array([c.fitness.probe.background.value for c in self.calcmodels])
@@ -234,7 +236,9 @@ class SimReflExperiment(object):
         # this version is limited to calculating profiles with measQ, cannot be used with initial calculation
         res = mappercalc(drawpoints)
 
-        qprofs = [np.array(r) for r in res]
+        qprofs = list()
+        for i in range(self.nmodels):
+            qprofs.append(np.array([r[i] for r in res]))
 
         return qprofs
 
