@@ -88,7 +88,7 @@ class ExperimentStep(object):
 
 class SimReflExperiment(object):
 
-    def __init__(self, problem, Q, f_intensity=magik_intensity, eta=0.8, npoints=1, switch_penalty=1, bestpars=None, fit_options=fit_options, oversampling=11, bkg=1e-6, startmodel=0, min_meas_time=10, select_pars=None) -> None:
+    def __init__(self, problem, Q, f_intensity=magik_intensity, eta=0.8, npoints=1, switch_penalty=1, bestpars=None, fit_options=fit_options, oversampling=11, meas_bkg=1e-6, startmodel=0, min_meas_time=10, select_pars=None) -> None:
         # running list of options: oversampling, background x nmodels, minQ, maxQ, fit_options, startmodel, wavelength
         # more options: eta, npoints, (nrepeats not necessary because multiple objects can be made and run), switch_penalty, min_meas_time
         # problem is the FitProblem object to simulate
@@ -141,12 +141,12 @@ class SimReflExperiment(object):
         if bestpars is not None:
             calcmodel.setp(bestpars)
 
-        if not isinstance(bkg, (list, np.ndarray)):
-            self.bkg = np.full(self.nmodels, bkg)
+        # deal with inherent measurement background
+        if not isinstance(meas_bkg, (list, np.ndarray)):
+            self.meas_bkg = np.full(self.nmodels, meas_bkg)
 
-        # add in background
-        for c, bval in zip(self.calcmodels, self.bkg):
-            c.fitness.probe.background.value = bval
+        # add residual background
+        self.resid_bkg = np.array([c.fitness.probe.background.value for c in self.calcmodels])
 
         self.newmodels = [m.fitness for m in models]
         self.par_scale = np.diff(problem.bounds(), axis=0)
@@ -203,11 +203,11 @@ class SimReflExperiment(object):
     
         points = []
 
-        for mnum, (newQ, mtime, mfom, qprof, bkg) in enumerate(zip(newQs, new_meastimes, newfoms, init_qprof, self.bkg)):
+        for mnum, (newQ, mtime, mfom, qprof, meas_bkg, resid_bkg) in enumerate(zip(newQs, new_meastimes, newfoms, init_qprof, self.meas_bkg, self.resid_bkg)):
             newR, newdR = np.mean(qprof, axis=0), dRoR * np.std(qprof, axis=0)
             targetN = (newR / newdR) ** 2
             target_incident_neutrons = targetN / newR
-            Ns, Nbkgs, Nincs = ar.sim_data_N(newR, target_incident_neutrons, background=bkg)
+            Ns, Nbkgs, Nincs = ar.sim_data_N(newR, target_incident_neutrons, resid_bkg=resid_bkg, meas_bkg=meas_bkg)
             #print(newR, target_incident_neutrons, Ns, Nbkgs, Nincs)
             Ts = ar.q2a(newQ, self.L)
             # TODO: Replace with resolution function
@@ -234,13 +234,9 @@ class SimReflExperiment(object):
         # this version is limited to calculating profiles with measQ, cannot be used with initial calculation
         res = mappercalc(drawpoints)
 
-        qprofs = list()
-        qbkgs = list()
-        for i in range(self.nmodels):
-            qprofs.append(np.array([r[0][i] for r in res]))
-            qbkgs.append(np.array([r[1][i] for r in res]))
+        qprofs = [np.array(r) for r in res]
 
-        return qprofs, qbkgs
+        return qprofs
 
     def fit_step(self, outfid=None):
         """Analyzes most recent step"""
@@ -279,7 +275,7 @@ class SimReflExperiment(object):
 
         print('Calculating %i Q profiles:' % (step.draw.points.shape[0]))
         init_time = time.time()
-        step.qprofs, step.qbkgs = self.calc_qprofiles(step.draw.points, mappercalc)
+        step.qprofs = self.calc_qprofiles(step.draw.points, mappercalc)
         print('Calculation time: %f' % (time.time() - init_time))
 
         ar.MPMapper.stop_mapper(mapper)
@@ -322,13 +318,14 @@ class SimReflExperiment(object):
         # alternative approach
         foms = list()
         meas_times = list()
-        for mnum, (m, Qth, qprof, qbkg) in enumerate(zip(self.models, self.measQ, step.qprofs, step.qbkgs)):
+        for mnum, (m, Qth, qprof, qbkg) in enumerate(zip(self.models, self.measQ, step.qprofs, self.meas_bkg)):
 
             incident_neutrons = self.intensity(Qth, modelnum=mnum)
 
             # define signal to background. For now, this is just a scaling factor on the effective rate
-            sbr = (qprof - qbkg[:,None]) / qbkg[:,None]
-            refl_rate = incident_neutrons * np.mean((qprof - qbkg[:,None])/(1+2/sbr), axis=0)
+            # TODO: Vectorize meas_bkg so there can be one value per measQ value
+            sbr = qprof / qbkg
+            refl_rate = incident_neutrons * np.mean(qprof/(1+2/sbr), axis=0)
             refl_rate = np.maximum(refl_rate, np.zeros_like(refl_rate))
 
             # q-dependent noise. Use the minimum of the actual spread in Q and the expected spread from the nearest points.
@@ -399,7 +396,7 @@ class SimReflExperiment(object):
             calcR = ar.calc_expected_R(self.calcmodels[mnum].fitness, *newvars, oversampling=self.oversampling)
             #print('expected R:', calcR)
             incident_neutrons = self.intensity(newQ, modelnum=mnum) * new_meastime
-            N, Nbkg, Ninc = ar.sim_data_N(calcR, incident_neutrons, background=self.bkg[mnum])
+            N, Nbkg, Ninc = ar.sim_data_N(calcR, incident_neutrons, resid_bkg=self.resid_bkg[mnum], meas_bkg=self.meas_bkg[mnum])
             #print(newR, target_incident_neutrons, N, Nbkg, Ninc)
             T = ar.q2a(newQ, self.L)
             dT = np.polyval(np.array([ 2.30358547e-01, -1.18046955e-05]), newQ)
@@ -443,12 +440,12 @@ class SimReflExperimentControl(SimReflExperiment):
     def take_step(self, total_time):
         points = list()
         #TODO: Make this into a (Q to points) function
-        for mnum, (newQ, mtimeweight, bkg) in enumerate(zip(self.measQ, self.meastimeweights, self.bkg)):
+        for mnum, (newQ, mtimeweight, meas_bkg, resid_bkg) in enumerate(zip(self.measQ, self.meastimeweights, self.meas_bkg, self.resid_bkg)):
             newvars = ar.gen_new_variables(newQ)
             calcR = ar.calc_expected_R(self.calcmodels[mnum].fitness, *newvars, oversampling=self.oversampling)
             #print('expected R:', calcR)
             incident_neutrons = self.intensity(newQ, modelnum=mnum) * total_time * mtimeweight
-            Ns, Nbkgs, Nincs = ar.sim_data_N(calcR, incident_neutrons, background=bkg)
+            Ns, Nbkgs, Nincs = ar.sim_data_N(calcR, incident_neutrons, meas_bkg=meas_bkg, resid_bkg=resid_bkg)
             #print(newR, target_incident_neutrons, Ns, Nbkgs, Nincs)
             Ts = ar.q2a(newQ, self.L)
             # TODO: Replace with resolution function

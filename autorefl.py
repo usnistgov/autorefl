@@ -46,10 +46,10 @@ def sim_data(R, incident_neutrons, addnoise=True, background=0):
 
     return (R-bR)/incident_neutrons, np.sqrt(dR**2 + dbR**2)/incident_neutrons
 
-def sim_data_N(R, incident_neutrons, addnoise=True, background=0):
+def sim_data_N(R, incident_neutrons, addnoise=True, resid_bkg=0, meas_bkg=0):
 
-    _bR = np.ones_like(R)*background*incident_neutrons
-    _R = (R+background)*incident_neutrons
+    _bR = np.ones_like(R)*meas_bkg*incident_neutrons
+    _R = (R + resid_bkg + meas_bkg)*incident_neutrons
     N = poisson.rvs(_R)
     bN = poisson.rvs(_bR)
 
@@ -89,7 +89,7 @@ def append_data(newQ, Rth, meas_time, bkgd, T, dT, L, dL, R, dR):
 def append_data_N(newQ, Rth, meas_time, bkgd, T=[], dT=[], L=[], dL=[], N=[], Nbkg=[], Ninc=[]):
     news1 = np.polyval(ps1, newQ)
     incident_neutrons = np.polyval(p_intens, news1) * meas_time
-    newN, newNbkg, newNinc = sim_data_N(Rth, incident_neutrons.astype(int), background=bkgd)
+    newN, newNbkg, newNinc = sim_data_N(Rth, incident_neutrons.astype(int), meas_bkg=bkgd)
     T = np.append(T, q2a(newQ, wv))
     dT = np.append(dT, np.polyval(pres, newQ))
     L = np.append(L, np.ones_like(newQ)*wv)
@@ -106,7 +106,7 @@ def create_init_data_N(newQs, qprofs, dRoR):
         newR, newdR = np.mean(qprof, axis=0), dRoR * np.std(qprof, axis=0)
         targetN = (newR / newdR) ** 2
         target_incident_neutrons = targetN / newR
-        N, Nbkg, Ninc = sim_data_N(newR, target_incident_neutrons.astype(int), background=0)
+        N, Nbkg, Ninc = sim_data_N(newR, target_incident_neutrons.astype(int), meas_bkg=0)
         #print(newR, target_incident_neutrons, N, Nbkg, Ninc)
         T = q2a(newQ, wv)
         dT = np.polyval(pres, newQ)
@@ -523,15 +523,13 @@ def _calc_qprofile(calcproblem, point):
     mlist = [calcproblem] if hasattr(calcproblem, 'fitness') else list(calcproblem.models)
     newvars = [gen_new_variables(Q) for Q in calcproblem.calcQs]
     qprof = list()
-    Qbkg = list()
     for m, newvar in zip(mlist, newvars):
         calcproblem.setp(point)
         calcproblem.chisq_str()
         Rth = calc_expected_R(m.fitness, *newvar, oversampling=calcproblem.oversampling)
         qprof.append(Rth)
-        Qbkg.append(m.fitness.probe.background.value)
 
-    return qprof, Qbkg
+    return qprof
 
 
 class MPMapper(object):
