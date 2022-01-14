@@ -491,6 +491,8 @@ def snapshot(exp, stepnumber, fig=None, power=4, tscale='log'):
     axbots = [fig.add_subplot(gsleft[1, i]) for i in range(exp.nmodels)]
 
     #print(np.array(step.qprofs).shape, step.draw.logp.shape)
+    foms = step.foms if step.foms is not None else [np.full_like(np.array(measQ), np.nan) for measQ in exp.measQ]
+    qprofs = step.qprofs if step.qprofs is not None else [np.full_like(np.array(measQ), np.nan) for measQ in exp.measQ]
     for i, (measQ, qprof, fom, axtop, axbot) in enumerate(zip(exp.measQ, step.qprofs, step.foms, axtops, axbots)):
         plotpoints = [pt for step in exp.steps[:(j+1)] if step.use for pt in step.points if pt.model == i]
         #print(*[[getattr(pt, attr) for pt in plotpoints] for attr in exp.attr_list])
@@ -529,7 +531,7 @@ def snapshot(exp, stepnumber, fig=None, power=4, tscale='log'):
 
     return fig, (axtops, axbots, axtopright, axbotright)
 
-def makemovie(exp, outfilename, fps=1, fmt='gif', power=4, tscale='log'):
+def makemovie(exp, outfilename, expctrl=None, fps=1, fmt='gif', power=4, tscale='log'):
     """ Makes a GIF or MP4 movie from a SimReflExperiment object"""
 
     fig = plt.figure(figsize=(8 + 4 * exp.nmodels, 8))
@@ -538,7 +540,15 @@ def makemovie(exp, outfilename, fps=1, fmt='gif', power=4, tscale='log'):
 
     for j in range(len(exp.steps[0:-1])):
 
-        fig, (axtops, axbots, axtopright, axbotright) = snapshot(exp, j, fig=fig, power=power, tscale=tscale)
+        fig, (_, _, axtopright, axbotright) = snapshot(exp, j, fig=fig, power=power, tscale=tscale)
+
+        if expctrl is not None:
+            allt = np.cumsum([step.meastime() for step in expctrl.steps])
+            allH = [step.dH for step in expctrl.steps]
+            allH_marg = [step.dH_marg for step in expctrl.steps]
+            axtopright.plot(allt, allH_marg, 'o-', color='0.9')
+            axbotright.plot(allt, allH, 'o-', color='0.9')
+
         fig.canvas.draw()
         image = np.frombuffer(fig.canvas.tostring_rgb(), dtype='uint8')
         image  = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
