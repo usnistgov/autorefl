@@ -48,8 +48,8 @@ def sim_data(R, incident_neutrons, addnoise=True, background=0):
 
 def sim_data_N(R, incident_neutrons, addnoise=True, resid_bkg=0, meas_bkg=0):
 
-    _bR = np.ones_like(R)*meas_bkg*incident_neutrons
-    _R = (R + resid_bkg + meas_bkg)*incident_neutrons
+    _bR = np.ones_like(R)*(meas_bkg - resid_bkg)*incident_neutrons
+    _R = (R + meas_bkg)*incident_neutrons
     N = poisson.rvs(_R)
     bN = poisson.rvs(_bR)
 
