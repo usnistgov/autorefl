@@ -24,6 +24,7 @@ parser.add_argument('--maxtime', type=float)
 parser.add_argument('--penalty', type=float)
 parser.add_argument('--burn', type=int)
 parser.add_argument('--steps', type=int)
+parser.add_argument('--resume', type=str)
 args = parser.parse_args()
 
 # define fit options dictionary
@@ -44,45 +45,73 @@ if __name__ == '__main__':
     fit_options['burn'] = 1000 if args.burn is None else args.burn
     fit_options['steps'] = 500 if args.steps is None else args.steps
 
-    fprefix = 'eta%0.2f_npoints%i_repeats%i' % (eta, npoints, nrepeats)
+    if args.resume is None:
 
-    # define file name and create results directory based on timestamp
-    fn = copy.copy(datetime.datetime.now().strftime('%Y%m%dT%H%M%S'))
-    pathname = fprefix + '_' + fn
-    os.mkdir(pathname)
-    #fn = './' + fn + fsuffix + '/' + fn
+        fprefix = 'eta%0.2f_npoints%i_repeats%i' % (eta, npoints, nrepeats)
 
-    #%%
-    # define calculation probe from model file (runs calculation for all models in model file)
-    modelfile = 'ssblm.py'
-    bestpars = 'ssblm.par'
+        # define file name and create results directory based on timestamp
+        fn = copy.copy(datetime.datetime.now().strftime('%Y%m%dT%H%M%S'))
+        pathname = fprefix + '_' + fn
+        os.mkdir(pathname)
+        #fn = './' + fn + fsuffix + '/' + fn
 
-    model = load_model(modelfile)
-    bestp = np.array([float(line.split(' ')[-1]) for line in open(bestpars, 'r').readlines()])
+        #%%
+        # define calculation probe from model file (runs calculation for all models in model file)
+        modelfile = 'ssblm.py'
+        bestpars = 'ssblm.par'
 
-    # calculation vector
-    measQ = np.linspace(0.008, 0.25, 201)
+        model = load_model(modelfile)
+        bestp = np.array([float(line.split(' ')[-1]) for line in open(bestpars, 'r').readlines()])
 
-    # parameters to use for marginalization
-    sel = np.array([10, 11, 12, 13, 14])
+        # calculation vector
+        measQ = np.linspace(0.008, 0.25, 201)
 
-    for kk in range(nrepeats):
-        exp = SimReflExperiment(model, measQ, eta=eta, fit_options=fit_options, oversampling=11, bestpars=bestp, select_pars=sel)
-        exp.add_initial_step()
-        total_t = 0.0
-        k = 0
+        # parameters to use for marginalization
+        sel = np.array([10, 11, 12, 13, 14])
+
+        for kk in range(nrepeats):
+            exp = SimReflExperiment(model, measQ, eta=eta, fit_options=fit_options, oversampling=11, bestpars=bestp, select_pars=sel, meas_bkg=[3e-6, 3e-5])
+            exp.add_initial_step()
+            total_t = 0.0
+            k = 0
+            while total_t < maxtime:
+                total_t += exp.steps[-1].meastime()
+                print('Rep: %i, Step: %i, Total time so far: %0.1f' % (kk, k, total_t))
+                exp.fit_step()
+                exp.take_step()
+                exp.save(pathname + '/exp%i.pickle' % kk)
+                k += 1
+
+            try:
+                makemovie(exp, pathname + '/exp%i' % kk, fmt='gif', fps=3)
+            except RuntimeError:
+                plt.switch_backend('agg')
+                makemovie(exp, pathname + '/exp%i' % kk, fmt='gif', fps=3)
+
+    else:
+        
+        pathname = os.path.dirname(args.resume)
+        filename = os.path.basename(args.resume)
+        basename = filename.split('.pickle')[0]
+        print('Resuming %s from %s...' % (basename, pathname))
+        exp = SimReflExperiment.load(args.resume)
+
+        total_t = sum([step.meastime() for step in exp.steps[:-1]])
+        k = len(exp.steps) - 1
         while total_t < maxtime:
             total_t += exp.steps[-1].meastime()
-            print('Rep: %i, Step: %i, Total time so far: %0.1f' % (kk, k, total_t))
+            print('Resumed, Step: %i, Total time so far: %0.1f' % (k, total_t))
             exp.fit_step()
             exp.take_step()
-            exp.save(pathname + '/exp%i.pickle' % kk)
+            exp.save(pathname + '/' + basename + '_resume.pickle')
             k += 1
 
         try:
-            makemovie(exp, pathname + '/exp%i' % kk, fmt='gif')
+            makemovie(exp, pathname + '/' + basename + '_resume', fmt='gif', fps=3)
         except RuntimeError:
             plt.switch_backend('agg')
-            makemovie(exp, pathname + '/exp%i' % kk, fmt='gif')
+            makemovie(exp, pathname + '/' + basename + '_resume', fmt='gif', fps=3)
+
+
 
 
