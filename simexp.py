@@ -427,8 +427,8 @@ class SimReflExperiment(object):
 
 class SimReflExperimentControl(SimReflExperiment):
 
-    def __init__(self, problem, Q, model_weights=None, f_intensity=magik_intensity, eta=0.8, npoints=1, switch_penalty=1, bestpars=None, fit_options=fit_options, oversampling=11, bkg=0.000001, startmodel=0, min_meas_time=10, select_pars=None) -> None:
-        super().__init__(problem, Q, f_intensity=f_intensity, eta=eta, npoints=npoints, switch_penalty=switch_penalty, bestpars=bestpars, fit_options=fit_options, oversampling=oversampling, bkg=bkg, startmodel=startmodel, min_meas_time=min_meas_time, select_pars=select_pars)
+    def __init__(self, problem, Q, model_weights=None, f_intensity=magik_intensity, eta=0.8, npoints=1, switch_penalty=1, bestpars=None, fit_options=fit_options, oversampling=11, meas_bkg=0.000001, startmodel=0, min_meas_time=10, select_pars=None) -> None:
+        super().__init__(problem, Q, f_intensity=f_intensity, eta=eta, npoints=npoints, switch_penalty=switch_penalty, bestpars=bestpars, fit_options=fit_options, oversampling=oversampling, meas_bkg=meas_bkg, startmodel=startmodel, min_meas_time=min_meas_time, select_pars=select_pars)
 
         if model_weights is None:
             model_weights = np.ones(self.nmodels)
