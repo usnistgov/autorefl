@@ -295,10 +295,8 @@ class SimReflExperiment(object):
         
         for i in range(self.npoints):
             # all models incur switch penalty except the current one
-            spenalty = np.full((self.nmodels, 1), self.switch_penalty)
-            spenalty[self.curmodel] = 1.0
-
-            step.scaled_foms = np.array(step.foms) / spenalty
+            spenalty = [1.0 if j == self.curmodel else self.switch_penalty for j in range(self.nmodels)]
+            step.scaled_foms = [fom / pen for fom, pen in zip(self.foms, spenalty)]
 
             newpoint = self.select_new_point(step, start=i)
             if newpoint is not None:
