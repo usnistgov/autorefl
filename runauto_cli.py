@@ -70,7 +70,7 @@ if __name__ == '__main__':
         sel = np.array([10, 11, 12, 13, 14])
 
         for kk in range(nrepeats):
-            exp = SimReflExperiment(model, measQ, eta=eta, fit_options=fit_options, oversampling=11, bestpars=bestp, select_pars=sel, meas_bkg=[3e-6, 3e-5])
+            exp = SimReflExperiment(model, measQ, eta=eta, fit_options=fit_options, oversampling=11, bestpars=bestp, select_pars=sel, meas_bkg=[3e-6, 3e-5], switch_penalty=penalty)
             exp.add_initial_step()
             total_t = 0.0
             k = 0
