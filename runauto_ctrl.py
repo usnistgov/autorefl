@@ -67,10 +67,10 @@ if __name__ == '__main__':
     sel = np.array([10, 11, 12, 13, 14])
 
     # meastimes
-    meastimes = np.diff(np.insert(np.logspace(1, np.log10(maxtime), 21, endpoint=True), 0, 0))
+    meastimes = np.diff(np.insert(np.logspace(1, np.log10(maxtime), 31, endpoint=True), 0, 0))
 
     for kk in range(nrepeats):
-        exp = SimReflExperimentControl(model, measQ, eta=eta, fit_options=fit_options, oversampling=11, bestpars=bestp, select_pars=sel, meas_bkg=[3e-6, 3e-5])
+        exp = SimReflExperimentControl(model, measQ, model_weights=[2., 1.], eta=eta, fit_options=fit_options, oversampling=11, bestpars=bestp, select_pars=sel, meas_bkg=[3e-6, 3e-5])
         total_t = 0.0
         k = 0
         for meastime in meastimes:
