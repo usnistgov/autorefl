@@ -15,8 +15,9 @@ plt.rcParams['lines.linewidth'] = 2
 plt.rcParams['font.size'] = 12
 plt.rcParams['lines.markersize'] = 8
 
-exps = []
-expctrls = []
+exps = glob.glob('eta0.[2-7]*')
+exps.sort()
+expctrls = ['control_20220117T143247/']
 colors = ['C%i' % i for i in range(10)]
 
 def combinedata(explist, controls=False):
@@ -30,9 +31,9 @@ def combinedata(explist, controls=False):
     for expname in explist:
         exp = ctype.load(expname)
         allt, allH, allH_marg = load_entropy(exp.steps[:-1]) if not controls else load_entropy(exp.steps)
-        allts = allts.append(allt)
-        allHs = allHs.append(allH)
-        allHs_marg = allHs_marg.append(allH_marg)
+        allts.append(allt)
+        allHs.append(allH)
+        allHs_marg.append(allH_marg)
 
     t = np.unique(np.array(allt).flatten())
     allHi = list()
@@ -50,7 +51,7 @@ def combinedata(explist, controls=False):
 
 def plot_data(av, raw, axm, ax, color=None):
 
-    for allt, allH, allH_marg in zip(raw):
+    for allt, allH, allH_marg in zip(*raw):
         axm.plot(allt, allH_marg, 'o', alpha=0.4, color=color)
         ax.plot(allt, allH, 'o', alpha=0.4, color=color)
 
@@ -58,18 +59,20 @@ def plot_data(av, raw, axm, ax, color=None):
     axm.plot(t, meanHi_marg, linewidth=4, alpha=0.7, color=color)
     axm.fill_between(t, meanHi_marg - stdHi_marg, meanHi_marg + stdHi_marg, color=color, alpha=0.3)
     ax.plot(t, meanHi, linewidth=4, alpha=0.7, color=color)
-    ax.fill_between(t, meanHi_marg - stdHi, meanHi + stdHi, color=color, alpha=0.3)
+    ax.fill_between(t, meanHi - stdHi, meanHi + stdHi, color=color, alpha=0.3)
 
 
-fig, (axm, ax) = plt.subplots(2, 1, sharex=True, gridspec_kw={'hspace': 0})
+fig, (axm, ax) = plt.subplots(2, 1, sharex=True, gridspec_kw={'hspace': 0}, figsize=(8, 10))
 
 for exppath, color in zip(exps, colors):
     explist = glob.glob(exppath + '/' + '*.pickle')
+    print(explist)
     avdata, rawdata = combinedata(explist)
     plot_data(avdata, rawdata, axm, ax, color=color)
 
-for exppath in zip(expctrls):
+for exppath in expctrls:
     explist = glob.glob(exppath + '/' + '*.pickle')
+    print(explist)
     avdata, rawdata = combinedata(explist)
     plot_data(avdata, rawdata, axm, ax, color='0.1')
 
@@ -85,3 +88,5 @@ if tscale == 'log':
                                     numticks=100)
     ax.xaxis.set_minor_locator(locmin)
 
+
+plt.show()
