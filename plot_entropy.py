@@ -63,7 +63,7 @@ if __name__ == '__main__':
     exps = glob.glob('eta0.[2-7,9]*')
     exps.append('eta0.80_npoints1_repeats1_20220115T194944')
     exps.sort()
-    expctrls = ['control_20220117T143247']
+    expctrls = ['control_20220118T180210']
     colors = ['C%i' % i for i in range(10)]
 
     fig, (axm, ax) = plt.subplots(2, 1, sharex=True, gridspec_kw={'hspace': 0}, figsize=(8, 10))
@@ -75,14 +75,14 @@ if __name__ == '__main__':
         print(explist)
         avdata, rawdata = combinedata(explist)
         plot_data(avdata, rawdata, axm, ax, color=color)
-        legend_elements.append(Line2D([0],[0], color=color, marker='o', alpha=0.4, label=exppath))
+        legend_elements.append(Line2D([0],[0], color=color, marker='o', alpha=0.4, label=r'$\eta=$' + exppath.split('eta')[1].split('_')[0]))
 
     for exppath in expctrls:
         explist = glob.glob(exppath + '/' + '*.pickle')
         print(explist)
         avdata, rawdata = combinedata(explist, controls=True)
         plot_data(avdata, rawdata, axm, ax, color='0.1')
-        legend_elements.append(Line2D([0],[0], color='0.1', marker='o', alpha=0.4, label=exppath))
+        legend_elements.append(Line2D([0],[0], color='0.1', marker='o', alpha=0.4, label='control'))
 
     ax.set_xlabel('Time (s)')
     ax.set_ylabel(r'$\Delta H_{total}$ (nats)')
@@ -99,4 +99,5 @@ if __name__ == '__main__':
     axm.legend(handles=legend_elements, loc=0, fontsize='smaller')
 
     fig.tight_layout()
+    plt.savefig('entropy_eta.png', dpi=300)
     plt.show()

@@ -33,7 +33,7 @@ def speedup(avexp, avctrl):
 exps = glob.glob('eta0.[2-7,9]*')
 exps.append('eta0.80_npoints1_repeats1_20220115T194944')
 exps.sort()
-expctrl = ['control_20220117T143247']
+expctrl = ['control_20220118T180210']
 colors = ['C%i' % i for i in range(10)]
 
 explist = glob.glob(expctrl[0] + '/' + '*.pickle')
@@ -55,7 +55,7 @@ for exppath, color in zip(exps, colors):
     axm.axhline(np.mean(ratmarg[tmarg>min_t_av]), linestyle='--', color=color)
     ax.plot(t, rat, 'o', alpha=0.4, color=color)
     ax.axhline(np.mean(rat[t>min_t_av]), linestyle='--', color=color)
-    legend_elements.append(Line2D([0],[0], color=color, marker='o', alpha=0.4, label=exppath))
+    legend_elements.append(Line2D([0],[0], color=color, marker='o', alpha=0.4, label=r'$\eta=$' + exppath.split('eta')[1].split('_')[0]))
 
 ax.set_xlabel('Time (s)')
 ax.set_ylabel(r'speedup')
@@ -72,4 +72,5 @@ if tscale == 'log':
 axm.legend(handles=legend_elements, loc=0, fontsize='smaller')
 
 fig.tight_layout()
+plt.savefig('speedup_eta.png', dpi=300)
 plt.show()
