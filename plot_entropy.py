@@ -15,9 +15,10 @@ plt.rcParams['lines.linewidth'] = 2
 plt.rcParams['font.size'] = 12
 plt.rcParams['lines.markersize'] = 8
 
-exps = glob.glob('eta0.[2-7]*')
+exps = glob.glob('eta0.[2-7,9]*')
+exps.append('eta0.80_npoints1_repeats1_20220115T194944')
 exps.sort()
-expctrls = ['control_20220117T143247/']
+expctrls = ['control_20220117T143247']
 colors = ['C%i' % i for i in range(10)]
 
 def combinedata(explist, controls=False):
@@ -76,7 +77,7 @@ for exppath, color in zip(exps, colors):
 for exppath in expctrls:
     explist = glob.glob(exppath + '/' + '*.pickle')
     print(explist)
-    avdata, rawdata = combinedata(explist)
+    avdata, rawdata = combinedata(explist, controls=True)
     plot_data(avdata, rawdata, axm, ax, color='0.1')
     legend_elements.append(Line2D([0],[0], color='0.1', marker='o', alpha=0.4, label=exppath))
 
@@ -94,4 +95,5 @@ if tscale == 'log':
 
 axm.legend(handles=legend_elements, loc=0, fontsize='smaller')
 
+fig.tight_layout()
 plt.show()
