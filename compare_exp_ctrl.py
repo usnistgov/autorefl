@@ -19,10 +19,16 @@ def speedup(avexp, avctrl):
     # unpack, throwing away first point (t = 0 typically for an experiment)
     tctrl, Hctrl, _, Hctrl_marg, _ = avctrl
     t, H, dH, H_marg, dH_marg = [a[1:] for a in avexp]
-    ti = np.interp(H, Hctrl, tctrl)
-    ti_marg = np.interp(H_marg, Hctrl_marg, tctrl)
+    ti = np.interp(H, Hctrl, tctrl, left=np.nan, right=np.nan)
+    ti_marg = np.interp(H_marg, Hctrl_marg, tctrl, left=np.nan, right=np.nan)
+    rat = ti / t
+    trat = t[~np.isnan(rat)]
+    rat = rat[~np.isnan(rat)]
+    rat_marg = ti_marg / t
+    trat_marg = t[~np.isnan(rat_marg)]
+    rat_marg = rat_marg[~np.isnan(rat_marg)]
 
-    return t, ti / t, ti_marg / t
+    return trat, rat, trat_marg, rat_marg
 
 exps = glob.glob('eta0.[2-7,9]*')
 exps.append('eta0.80_npoints1_repeats1_20220115T194944')
@@ -30,7 +36,9 @@ exps.sort()
 expctrl = ['control_20220117T143247']
 colors = ['C%i' % i for i in range(10)]
 
-avctrl, rawctrl = combinedata(expctrl, controls=True)
+explist = glob.glob(expctrl[0] + '/' + '*.pickle')
+print(explist)
+avctrl, rawctrl = combinedata(explist, controls=True)
 
 fig, (axm, ax) = plt.subplots(2, 1, sharex=True, gridspec_kw={'hspace': 0}, figsize=(8, 10))
 
@@ -42,11 +50,11 @@ for exppath, color in zip(exps, colors):
     explist = glob.glob(exppath + '/' + '*.pickle')
     print(explist)
     avdata, rawdata = combinedata(explist)
-    t, rat, ratmarg = speedup(avdata, avctrl)
-    axm.plot(t, ratmarg, 'o', alpha=0.4, color=color)
-    axm.axvline(np.mean(ratmarg[t>min_t_av]), linestyle='--', color=color)
+    t, rat, tmarg, ratmarg = speedup(avdata, avctrl)
+    axm.plot(tmarg, ratmarg, 'o', alpha=0.4, color=color)
+    axm.axhline(np.mean(ratmarg[tmarg>min_t_av]), linestyle='--', color=color)
     ax.plot(t, rat, 'o', alpha=0.4, color=color)
-    ax.axvline(np.mean(rat[t>min_t_av]), linestyle='--', color=color)
+    ax.axhline(np.mean(rat[t>min_t_av]), linestyle='--', color=color)
     legend_elements.append(Line2D([0],[0], color=color, marker='o', alpha=0.4, label=exppath))
 
 ax.set_xlabel('Time (s)')
