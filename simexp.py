@@ -459,11 +459,18 @@ class SimReflExperimentControl(SimReflExperiment):
         
         self.add_step(points)
 
+def load_entropy(steps):
+
+    allt = np.cumsum([step.meastime() for step in steps])
+    allH = [step.dH for step in steps]
+    allH_marg = [step.dH_marg for step in steps]
+
+    return allt, allH, allH_marg
+
+
 def snapshot(exp, stepnumber, fig=None, power=4, tscale='log'):
 
-    allt = np.cumsum([step.meastime() for step in exp.steps[:-1]])
-    allH = [step.dH for step in exp.steps[:-1]]
-    allH_marg = [step.dH_marg for step in exp.steps[:-1]]
+    allt, allH, allH_marg = load_entropy(exp.steps[:-1])
 
     if fig is None:
         fig = plt.figure(figsize=(8 + 4 * exp.nmodels, 8))
@@ -544,9 +551,7 @@ def makemovie(exp, outfilename, expctrl=None, fps=1, fmt='gif', power=4, tscale=
         fig, (_, _, axtopright, axbotright) = snapshot(exp, j, fig=fig, power=power, tscale=tscale)
 
         if expctrl is not None:
-            allt = np.cumsum([step.meastime() for step in expctrl.steps])
-            allH = [step.dH for step in expctrl.steps]
-            allH_marg = [step.dH_marg for step in expctrl.steps]
+            allt, allH, allH_marg = load_entropy(expctrl.steps)
             axtopright.plot(allt, allH_marg, 'o-', color='0.1')
             axbotright.plot(allt, allH, 'o-', color='0.1')
 
