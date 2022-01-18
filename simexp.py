@@ -5,6 +5,7 @@ import dill
 #from bumps.cli import load_model, load_best
 from bumps.fitters import DreamFit, ConsoleMonitor, _fill_defaults, StepMonitor
 from bumps.initpop import generate
+from bumps.mapper import MPMapper
 #from bumps.dream.state import load_state
 #from refl1d.names import FitProblem, Experiment
 from refl1d.resolution import TL2Q, dTdL2dQ
@@ -169,14 +170,14 @@ class SimReflExperiment(object):
         setattr(self.problem, 'calcQs', self.measQ)
         setattr(self.problem, 'oversampling', self.oversampling)
 
-        self.mapper, self.mappercalc = ar.MPMapper.start_mapper(self.problem, None, cpus=0)
+        self.mapper = MPMapper.start_mapper(self.problem, None, cpus=0)
 
     def stop_mapper(self):
 
-        ar.MPMapper.pool.terminate()
+        MPMapper.pool.terminate()
         
         # allow start_mapper call again
-        ar.MPMapper.pool = None
+        MPMapper.pool = None
 
     def get_all_points(self, modelnum):
         return [pt for step in self.steps for pt in step.points if pt.model == modelnum]
@@ -250,7 +251,9 @@ class SimReflExperiment(object):
         setattr(self.problem, 'calcQs', self.measQ)
         setattr(self.problem, 'oversampling', self.oversampling)
 
-        mapper, mappercalc = ar.MPMapper.start_mapper(self.problem, None, cpus=0)
+        mapper = MPMapper.start_mapper(self.problem, None, cpus=0)
+
+        mappercalc = lambda points: MPMapper.pool.map(_MP_calc_qprofile, ((MPMapper.problem_id, p) for p in points))
 
         if outfid is not None:
             monitor = StepMonitor(self.problem, outfid)
@@ -282,8 +285,8 @@ class SimReflExperiment(object):
         step.qprofs = self.calc_qprofiles(step.draw.points, mappercalc)
         print('Calculation time: %f' % (time.time() - init_time))
 
-        ar.MPMapper.stop_mapper(mapper)
-        ar.MPMapper.pool = None
+        MPMapper.stop_mapper(mapper)
+        MPMapper.pool = None
 
     def take_step(self):
 
@@ -458,6 +461,33 @@ class SimReflExperimentControl(SimReflExperiment):
                 points.append(DataPoint(t, mnum, (T, dT, L, dL, N, Nbkg, Ninc)))
         
         self.add_step(points)
+
+def _MP_calc_qprofile(problem_point_pair):
+    # given a problem and a sample draw and a Q-vector, calculate the profiles associated with each sample
+    problem_id, point = problem_point_pair
+    if problem_id != MPMapper.problem_id:
+        #print(f"Fetching problem {problem_id} from namespace")
+        # Problem is pickled using dill when it is available
+        try:
+            import dill
+            MPMapper.problem = dill.loads(MPMapper.namespace.pickled_problem)
+        except ImportError:
+            MPMapper.problem = MPMapper.namespace.problem
+        MPMapper.problem_id = problem_id
+    return _calc_qprofile(MPMapper.problem, point)
+
+def _calc_qprofile(calcproblem, point):
+    mlist = [calcproblem] if hasattr(calcproblem, 'fitness') else list(calcproblem.models)
+    newvars = [ar.gen_new_variables(Q) for Q in calcproblem.calcQs]
+    qprof = list()
+    for m, newvar in zip(mlist, newvars):
+        calcproblem.setp(point)
+        calcproblem.chisq_str()
+        Rth = ar.calc_expected_R(m.fitness, *newvar, oversampling=calcproblem.oversampling)
+        qprof.append(Rth)
+
+    return qprof
+
 
 def load_entropy(steps):
 
