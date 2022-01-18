@@ -64,17 +64,21 @@ def plot_data(av, raw, axm, ax, color=None):
 
 fig, (axm, ax) = plt.subplots(2, 1, sharex=True, gridspec_kw={'hspace': 0}, figsize=(8, 10))
 
+legend_elements = []
+
 for exppath, color in zip(exps, colors):
     explist = glob.glob(exppath + '/' + '*.pickle')
     print(explist)
     avdata, rawdata = combinedata(explist)
     plot_data(avdata, rawdata, axm, ax, color=color)
+    legend_elements.append(Line2D([0],[0], color=color, marker='o', alpha=0.4, label=exppath))
 
 for exppath in expctrls:
     explist = glob.glob(exppath + '/' + '*.pickle')
     print(explist)
     avdata, rawdata = combinedata(explist)
     plot_data(avdata, rawdata, axm, ax, color='0.1')
+    legend_elements.append(Line2D([0],[0], color='0.1', marker='o', alpha=0.4, label=exppath))
 
 ax.set_xlabel('Time (s)')
 ax.set_ylabel(r'$\Delta H_{total}$ (nats)')
@@ -88,5 +92,6 @@ if tscale == 'log':
                                     numticks=100)
     ax.xaxis.set_minor_locator(locmin)
 
+axm.legend(handles=legend_elements, loc=0, fontsize='smaller')
 
 plt.show()
