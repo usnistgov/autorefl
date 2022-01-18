@@ -8,18 +8,10 @@ from matplotlib.lines import Line2D
 from simexp import SimReflExperiment, SimReflExperimentControl, load_entropy
 #from autorefl import *
 
-tscale ='log'
-
 plt.rcParams['pdf.fonttype'] = 42
 plt.rcParams['lines.linewidth'] = 2
 plt.rcParams['font.size'] = 12
 plt.rcParams['lines.markersize'] = 8
-
-exps = glob.glob('eta0.[2-7,9]*')
-exps.append('eta0.80_npoints1_repeats1_20220115T194944')
-exps.sort()
-expctrls = ['control_20220117T143247']
-colors = ['C%i' % i for i in range(10)]
 
 def combinedata(explist, controls=False):
 
@@ -63,37 +55,48 @@ def plot_data(av, raw, axm, ax, color=None):
     ax.fill_between(t, meanHi - stdHi, meanHi + stdHi, color=color, alpha=0.3)
 
 
-fig, (axm, ax) = plt.subplots(2, 1, sharex=True, gridspec_kw={'hspace': 0}, figsize=(8, 10))
+if __name__ == '__main__':
 
-legend_elements = []
+    tscale ='log'
 
-for exppath, color in zip(exps, colors):
-    explist = glob.glob(exppath + '/' + '*.pickle')
-    print(explist)
-    avdata, rawdata = combinedata(explist)
-    plot_data(avdata, rawdata, axm, ax, color=color)
-    legend_elements.append(Line2D([0],[0], color=color, marker='o', alpha=0.4, label=exppath))
 
-for exppath in expctrls:
-    explist = glob.glob(exppath + '/' + '*.pickle')
-    print(explist)
-    avdata, rawdata = combinedata(explist, controls=True)
-    plot_data(avdata, rawdata, axm, ax, color='0.1')
-    legend_elements.append(Line2D([0],[0], color='0.1', marker='o', alpha=0.4, label=exppath))
+    exps = glob.glob('eta0.[2-7,9]*')
+    exps.append('eta0.80_npoints1_repeats1_20220115T194944')
+    exps.sort()
+    expctrls = ['control_20220117T143247']
+    colors = ['C%i' % i for i in range(10)]
 
-ax.set_xlabel('Time (s)')
-ax.set_ylabel(r'$\Delta H_{total}$ (nats)')
-axm.set_ylabel(r'$\Delta H_{marg}$ (nats)')
-tscale = tscale if tscale in ['linear', 'log'] else 'log'
-ax.set_xscale(tscale)
-ax.tick_params(axis='x', direction='inout', which='both', top=True, bottom=True)
-ax.tick_params(axis='x', which='major', labelbottom=True, labeltop=False)
-if tscale == 'log':
-    locmin = matplotlib.ticker.LogLocator(base=10.0, subs=np.arange(2, 10) * .1,
-                                    numticks=100)
-    ax.xaxis.set_minor_locator(locmin)
+    fig, (axm, ax) = plt.subplots(2, 1, sharex=True, gridspec_kw={'hspace': 0}, figsize=(8, 10))
 
-axm.legend(handles=legend_elements, loc=0, fontsize='smaller')
+    legend_elements = []
 
-fig.tight_layout()
-plt.show()
+    for exppath, color in zip(exps, colors):
+        explist = glob.glob(exppath + '/' + '*.pickle')
+        print(explist)
+        avdata, rawdata = combinedata(explist)
+        plot_data(avdata, rawdata, axm, ax, color=color)
+        legend_elements.append(Line2D([0],[0], color=color, marker='o', alpha=0.4, label=exppath))
+
+    for exppath in expctrls:
+        explist = glob.glob(exppath + '/' + '*.pickle')
+        print(explist)
+        avdata, rawdata = combinedata(explist, controls=True)
+        plot_data(avdata, rawdata, axm, ax, color='0.1')
+        legend_elements.append(Line2D([0],[0], color='0.1', marker='o', alpha=0.4, label=exppath))
+
+    ax.set_xlabel('Time (s)')
+    ax.set_ylabel(r'$\Delta H_{total}$ (nats)')
+    axm.set_ylabel(r'$\Delta H_{marg}$ (nats)')
+    tscale = tscale if tscale in ['linear', 'log'] else 'log'
+    ax.set_xscale(tscale)
+    ax.tick_params(axis='x', direction='inout', which='both', top=True, bottom=True)
+    ax.tick_params(axis='x', which='major', labelbottom=True, labeltop=False)
+    if tscale == 'log':
+        locmin = matplotlib.ticker.LogLocator(base=10.0, subs=np.arange(2, 10) * .1,
+                                        numticks=100)
+        ax.xaxis.set_minor_locator(locmin)
+
+    axm.legend(handles=legend_elements, loc=0, fontsize='smaller')
+
+    fig.tight_layout()
+    plt.show()
