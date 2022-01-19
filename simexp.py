@@ -523,7 +523,7 @@ def snapshot(exp, stepnumber, fig=None, power=4, tscale='log'):
     tscale = tscale if tscale in ['linear', 'log'] else 'log'
     axbotright.set_xscale(tscale)
     if tscale == 'linear':
-        axbotright.set_xlim([0, min(max(allt[min(2, len(allt) - 1)], 2 * allt[j]), max(allt))])
+        axbotright.set_xlim([0, min(max(allt[min(2, len(allt) - 1)], 3 * allt[j]), max(allt))])
 
     axtops = [fig.add_subplot(gsleft[0, i]) for i in range(exp.nmodels)]
     axbots = [fig.add_subplot(gsleft[1, i]) for i in range(exp.nmodels)]
