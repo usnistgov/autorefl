@@ -5,6 +5,7 @@ from bumps.cli import load_model, load_best
 from bumps.fitters import DreamFit, ConsoleMonitor, _fill_defaults, StepMonitor
 from bumps.initpop import generate
 from bumps.dream.state import load_state
+from bumps.mapper import nice
 from refl1d.names import FitProblem, Experiment
 from refl1d.resolution import TL2Q, dTdL2dQ
 import matplotlib.pyplot as plt
@@ -45,17 +46,17 @@ def sim_data(R, incident_neutrons, addnoise=True, background=0):
 
     return (R-bR)/incident_neutrons, np.sqrt(dR**2 + dbR**2)/incident_neutrons
 
-def sim_data_N(R, incident_neutrons, addnoise=True, background=0):
+def sim_data_N(R, incident_neutrons, addnoise=True, resid_bkg=0, meas_bkg=0):
 
-    _bR = np.ones_like(R)*background*incident_neutrons
-    _R = (R+background)*incident_neutrons
+    _bR = np.ones_like(R)*(meas_bkg - resid_bkg)*incident_neutrons
+    _R = (R + meas_bkg)*incident_neutrons
     N = poisson.rvs(_R)
     bN = poisson.rvs(_bR)
 
     return N, bN, incident_neutrons
 
 def gen_new_variables(newQ):
-    Q = np.array(newQ)
+    Q = np.array(newQ, ndmin=1)
     T = q2a(Q, wv)
     dT = np.polyval(pres, Q)
     L = wv
@@ -85,10 +86,10 @@ def append_data(newQ, Rth, meas_time, bkgd, T, dT, L, dL, R, dR):
     
     return T, dT, L, dL, R, dR
 
-def append_data_N(newQ, Rth, meas_time, bkgd, T, dT, L, dL, N, Nbkg, Ninc):
+def append_data_N(newQ, Rth, meas_time, bkgd, T=[], dT=[], L=[], dL=[], N=[], Nbkg=[], Ninc=[]):
     news1 = np.polyval(ps1, newQ)
     incident_neutrons = np.polyval(p_intens, news1) * meas_time
-    newN, newNbkg, newNinc = sim_data_N(Rth, incident_neutrons, background=bkgd)
+    newN, newNbkg, newNinc = sim_data_N(Rth, incident_neutrons.astype(int), meas_bkg=bkgd)
     T = np.append(T, q2a(newQ, wv))
     dT = np.append(dT, np.polyval(pres, newQ))
     L = np.append(L, np.ones_like(newQ)*wv)
@@ -105,7 +106,7 @@ def create_init_data_N(newQs, qprofs, dRoR):
         newR, newdR = np.mean(qprof, axis=0), dRoR * np.std(qprof, axis=0)
         targetN = (newR / newdR) ** 2
         target_incident_neutrons = targetN / newR
-        N, Nbkg, Ninc = sim_data_N(newR, target_incident_neutrons, background=0)
+        N, Nbkg, Ninc = sim_data_N(newR, target_incident_neutrons.astype(int), meas_bkg=0)
         #print(newR, target_incident_neutrons, N, Nbkg, Ninc)
         T = q2a(newQ, wv)
         dT = np.polyval(pres, newQ)
@@ -148,7 +149,7 @@ def compile_data(Qbasis, T, dT, L, dL, R, dR):
 
 def compile_data_N(Qbasis, T, dT, L, dL, Ntot, Nbkg, Ninc):
     _Q = TL2Q(T=T, L=L)
-#    print('compile_data_N: ', len(_Q), _Q)
+    #print('compile_data_N: ', len(_Q), _Q, Qbasis)
     if len(_Q):
     # make sure end bins contain the first and last Q values (always should)
         Qbasis[0] = min(min(Qbasis), min(_Q))
@@ -161,8 +162,8 @@ def compile_data_N(Qbasis, T, dT, L, dL, Ntot, Nbkg, Ninc):
         _Nmin = np.max(np.vstack(((_N + _Nbkg), np.ones_like(_N))), axis=0)
         _dR = np.sqrt(_Nmin)[nz] / _norm[nz]
         #print(_Q.shape, _dR.shape)
-        _normR = np.histogram(_Q, Qbasis, weights=1./dT**2)[0][nz]
-        _T = np.histogram(_Q, Qbasis, weights=T/dT**2)[0][nz]/_normR
+        _normR = np.histogram(_Q, Qbasis, weights=1./np.array(dT)**2)[0][nz]
+        _T = np.histogram(_Q, Qbasis, weights=np.array(T)/np.array(dT)**2)[0][nz]/_normR
         _L = np.ones_like(_T) * wv
         _dL = np.ones_like(_T) * dwv
         _Q = TL2Q(_T, _L)
@@ -174,7 +175,6 @@ def compile_data_N(Qbasis, T, dT, L, dL, Ntot, Nbkg, Ninc):
     else:
 
         return tuple([np.array([]) for _ in range(8)])
-
 
 def append_data_overlap(newQ, Rth, meas_time, bkgd, T, dT, L, dL, R, dR, overlap_index=None):
     news1 = np.polyval(ps1, newQ)
@@ -227,8 +227,8 @@ def calc_entropy(pts, select_pars=None):
     return H
 
 def calc_init_entropy(problem, select_pars=None):
-    par_scale = np.diff(problem.bounds(), axis=0)
-    return calc_entropy(generate(problem, init='random', pop=9, use_point=False)/par_scale, select_pars=select_pars)
+    #par_scale = np.diff(problem.bounds(), axis=0)
+    return calc_entropy(generate(problem, init='random', pop=9, use_point=False), select_pars=select_pars)
 
 def calc_qprofiles(problem, drawpoints, Qth, oversampling=None):
     # given a problem and a sample draw and a Q-vector, calculate the profiles associated with each sample
@@ -251,7 +251,7 @@ def calc_qprofiles(problem, drawpoints, Qth, oversampling=None):
 
     return qprof, Qbkg
 
-def plot_qprofiles(Qth, qprofs, logps, data=None, ax=None, exclude_from=0):
+def plot_qprofiles(Qth, qprofs, logps, data=None, ax=None, exclude_from=0, power=4):
     #Qs, Rs, dRs = problem.fitness.probe.Q[exclude_from:], problem.fitness.probe.R[exclude_from:], problem.fitness.probe.dR[exclude_from:]
     if ax is None:
         fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(10,8))
@@ -262,32 +262,36 @@ def plot_qprofiles(Qth, qprofs, logps, data=None, ax=None, exclude_from=0):
         _, _, _, _, Rs, dRs, Qs, _ = compile_data_N(Qth, *data)
         #print('plot_qprofiles: ', len(Qs))
         if len(Qs) > 0:
-            ax.errorbar(Qs[exclude_from:], (Rs*Qs**4)[exclude_from:], (dRs*Qs**4)[exclude_from:], fmt='o', color='k', markersize=10, alpha=0.7, capsize=8, linewidth=3, zorder=100)
+            ax.errorbar(Qs[exclude_from:], (Rs*Qs**power)[exclude_from:], (dRs*Qs**power)[exclude_from:], fmt='o', color='k', markersize=10, alpha=0.7, capsize=8, linewidth=3, zorder=100)
 
     cmin, cmax = np.median(logps) + 2 * np.std(logps) * np.array([-1,1])
     colornorm = colors.Normalize(vmin=cmin, vmax=cmax)
     cmap = cm.ScalarMappable(norm=colornorm, cmap=cm.jet)
 
     for qp, logp in zip(qprofs, logps):
-        ax.plot(Qth, qp*Qth**4, '-', alpha=0.3, color=cmap.to_rgba(logp))
+        ax.plot(Qth, qp*Qth**power, '-', alpha=0.3, color=cmap.to_rgba(logp))
 
     ax.set_yscale('log')
-    ax2 = ax.inset_axes([1.1, 0, 0.08, 1], transform=ax.transAxes)
-    plt.colorbar(cmap, ax=ax, cax=ax2)
-    ax2.tick_params(axis='y', right=True, left=True, labelright=False, labelleft=True)
-    ax3 = ax2.inset_axes([1,0,2,1], transform=ax2.transAxes)
-    h = np.histogram(logps, bins=int(round(len(logps)/10)), range=[cmin, cmax])
-    ax3.plot(h[0], 0.5 * (h[1][1:] + h[1][:-1]), linewidth=3)
-    ax3.fill_betweenx(0.5 * (h[1][1:] + h[1][:-1]), h[0], alpha=0.4)
-    xlims = ax3.get_xlim()
-    ax3.set_xlim([0, max(xlims)])
-    ylims = ax2.get_ylim()
-    ax3.set_ylim(ylims)
-    ax3.tick_params(axis='y', labelleft=False)
-    ax3.set_ylabel('log likelihood')
-    ax3.set_xlabel('N')
-    ax.set_xlabel(r'$Q_z$ (' + u'\u212b' + r'$^{-1}$)')
-    ax.set_ylabel(r'$R \times Q_z^4$ (' + u'\u212b' + r'$^{-4}$)')
+    if 0:
+        ax2 = ax.inset_axes([1.1, 0, 0.08, 1], transform=ax.transAxes)
+        plt.colorbar(cmap, ax=ax, cax=ax2)
+        ax2.tick_params(axis='y', right=True, left=True, labelright=False, labelleft=True)
+        ax3 = ax2.inset_axes([1,0,2,1], transform=ax2.transAxes)
+        h = np.histogram(logps, bins=int(round(len(logps)/10)), range=[cmin, cmax])
+        ax3.plot(h[0], 0.5 * (h[1][1:] + h[1][:-1]), linewidth=3)
+        ax3.fill_betweenx(0.5 * (h[1][1:] + h[1][:-1]), h[0], alpha=0.4)
+        xlims = ax3.get_xlim()
+        ax3.set_xlim([0, max(xlims)])
+        ylims = ax2.get_ylim()
+        ax3.set_ylim(ylims)
+        ax3.tick_params(axis='y', labelleft=False)
+        ax3.set_ylabel('log likelihood')
+        ax3.set_xlabel('N')
+        ax.set_xlabel(r'$Q_z$ (' + u'\u212b' + r'$^{-1}$)')
+        ax.set_ylabel(r'$R \times Q_z^%i$ (' % power + u'\u212b' + r'$^{-4}$)')
+    else:
+        ax2 = None
+        ax3 = None
 
     return fig, (ax, ax2, ax3)
 
@@ -476,3 +480,5 @@ class DreamFitPlus(DreamFit):
         #print(points[-1], x)
         #assert all(points[-1, i] == xi for i, xi in enumerate(x))
         return x, -fx
+
+
