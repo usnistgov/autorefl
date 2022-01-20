@@ -38,8 +38,13 @@ class DataPoint(object):
         self.data = data
 
     def __repr__(self):
-        # TODO: fix this for multiple data points
-        return 'Model: %i\tQ: %0.4f Ang^-1\tTime: %0.1f s' % (self.model, self.Q(), self.t)
+
+        try:
+            reprq = 'Q: %0.4f Ang^-1' % self.Q()
+        except TypeError:
+            reprq = 'Q: ' + ', '.join('{:0.4f}'.format(q) for q in self.Q()) + ' Ang^-1'
+        
+        return ('Model: %i\t' % self.model) + reprq + ('\tTime: %0.1f s' %  self.t)
 
     @property
     def data(self):
