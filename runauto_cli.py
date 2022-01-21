@@ -1,11 +1,13 @@
 #%%
 import datetime
+from multiprocessing.sharedctypes import Value
 import numpy as np
 import copy
 import os
 from bumps.cli import load_model
 import matplotlib.pyplot as plt
 from simexp import SimReflExperiment, makemovie
+import instrument
 import argparse
 #import imageio
 #import skvideo.io
@@ -25,6 +27,7 @@ parser.add_argument('--penalty', type=float)
 parser.add_argument('--burn', type=int)
 parser.add_argument('--steps', type=int)
 parser.add_argument('--resume', type=str)
+parser.add_argument('--instrument', type=str)
 args = parser.parse_args()
 
 # define fit options dictionary
@@ -47,7 +50,14 @@ if __name__ == '__main__':
 
     if args.resume is None:
 
-        fprefix = 'eta%0.2f_npoints%i_repeats%i' % (eta, npoints, nrepeats)
+        if (args.instrument == 'MAGIK') | (args.instrument is None):
+            instr = instrument.MAGIK()
+        elif args.instrument == 'CANDOR':
+            instr = instrument.CANDOR()
+        else:
+            raise ValueError('instrument must be MAGIK or CANDOR')
+
+        fprefix = '%s_eta%0.2f_npoints%i_repeats%i' % (instr.name, eta, npoints, nrepeats)
 
         # define file name and create results directory based on timestamp
         fn = copy.copy(datetime.datetime.now().strftime('%Y%m%dT%H%M%S'))
@@ -70,7 +80,7 @@ if __name__ == '__main__':
         sel = np.array([10, 11, 12, 13, 14])
 
         for kk in range(nrepeats):
-            exp = SimReflExperiment(model, measQ, eta=eta, fit_options=fit_options, oversampling=11, bestpars=bestp, select_pars=sel, meas_bkg=[3e-6, 3e-5], switch_penalty=penalty)
+            exp = SimReflExperiment(model, measQ, instrument=instr, eta=eta, fit_options=fit_options, oversampling=11, bestpars=bestp, select_pars=sel, meas_bkg=[3e-6, 3e-5], switch_penalty=penalty)
             exp.add_initial_step()
             total_t = 0.0
             k = 0
