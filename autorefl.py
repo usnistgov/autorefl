@@ -14,9 +14,9 @@ from bumps.mapper import MPMapper, can_pickle, SerialMapper
 from sklearn.linear_model import LinearRegression
 from scipy.stats import poisson
 
-d_intens = np.loadtxt('magik_intensity_hw106.refl')
+d_intens = np.loadtxt('calibration/magik_intensity_hw106.refl')
 
-spec = np.loadtxt('magik_specular_hw106.dat', usecols=[31, 26, 5], skiprows=9, unpack=False)
+spec = np.loadtxt('calibration/magik_specular_hw106.dat', usecols=[31, 26, 5], skiprows=9, unpack=False)
 
 qs, s1s, ares = np.delete(spec, 35, 0).T
 
@@ -47,11 +47,11 @@ def sim_data(R, incident_neutrons, addnoise=True, background=0):
     return (R-bR)/incident_neutrons, np.sqrt(dR**2 + dbR**2)/incident_neutrons
 
 def sim_data_N(R, incident_neutrons, addnoise=True, resid_bkg=0, meas_bkg=0):
-
+    R = np.array(R, ndmin=1)
     _bR = np.ones_like(R)*(meas_bkg - resid_bkg)*incident_neutrons
     _R = (R + meas_bkg)*incident_neutrons
-    N = poisson.rvs(_R)
-    bN = poisson.rvs(_bR)
+    N = poisson.rvs(_R, size=_R.shape)
+    bN = poisson.rvs(_bR, size=_bR.shape)
 
     return N, bN, incident_neutrons
 
@@ -148,26 +148,28 @@ def compile_data(Qbasis, T, dT, L, dL, R, dR):
     return _T, _dT, _L, _dL, _R, _dR, _Q, _dQ
 
 def compile_data_N(Qbasis, T, dT, L, dL, Ntot, Nbkg, Ninc):
+    _Qbasis = copy.copy(Qbasis)
     _Q = TL2Q(T=T, L=L)
-    #print('compile_data_N: ', len(_Q), _Q, Qbasis)
+    #print('compile_data_N: ', len(_Q), _Q, _Qbasis)
     if len(_Q):
     # make sure end bins contain the first and last Q values (always should)
-        Qbasis[0] = min(min(Qbasis), min(_Q))
-        Qbasis[-1] = max(max(Qbasis), max(_Q))
-        _N, _bins = np.histogram(_Q, Qbasis, weights=Ntot)
-        _Nbkg = np.histogram(_Q, Qbasis, weights=Nbkg)[0]
-        _norm = np.histogram(_Q, Qbasis, weights=Ninc)[0]
+        _Qbasis[0] = min(min(_Qbasis), min(_Q))
+        _Qbasis[-1] = max(max(_Qbasis), max(_Q))
+        _N, _bins = np.histogram(_Q, _Qbasis, weights=Ntot)
+        _Nbkg = np.histogram(_Q, _Qbasis, weights=Nbkg)[0]
+        _norm = np.histogram(_Q, _Qbasis, weights=Ninc)[0]
         nz = _norm.nonzero()
         _R = (_N[nz]-_Nbkg[nz])/_norm[nz]
         _Nmin = np.max(np.vstack(((_N + _Nbkg), np.ones_like(_N))), axis=0)
         _dR = np.sqrt(_Nmin)[nz] / _norm[nz]
         #print(_Q.shape, _dR.shape)
-        _normR = np.histogram(_Q, Qbasis, weights=1./np.array(dT)**2)[0][nz]
-        _T = np.histogram(_Q, Qbasis, weights=np.array(T)/np.array(dT)**2)[0][nz]/_normR
-        _L = np.ones_like(_T) * wv
-        _dL = np.ones_like(_T) * dwv
+        _normR = np.histogram(_Q, _Qbasis, weights=1./np.array(dT)**2)[0][nz]
+        _normRL = np.histogram(_Q, _Qbasis, weights=1./np.array(dL)**2)[0][nz]
+        _T = np.histogram(_Q, _Qbasis, weights=np.array(T)/np.array(dT)**2)[0][nz]/_normR
+        _L = np.histogram(_Q, _Qbasis, weights=np.array(L)/np.array(dL)**2)[0][nz]/_normRL
+        _dL = np.ones_like(_L) * np.mean(dL)
         _Q = TL2Q(_T, _L)
-        _dT = np.polyval(pres, _Q)
+        _dT = np.ones_like(_T) * np.mean(dT)
         _dQ = dTdL2dQ(_T, _dT, _L, _dL)    
 
         return _T, _dT, _L, _dL, _R, _dR, _Q, _dQ
@@ -260,7 +262,7 @@ def plot_qprofiles(Qth, qprofs, logps, data=None, ax=None, exclude_from=0, power
 
     if data is not None:
         _, _, _, _, Rs, dRs, Qs, _ = compile_data_N(Qth, *data)
-        #print('plot_qprofiles: ', len(Qs))
+        print('plot_qprofiles: ', len(Qs), Qs)
         if len(Qs) > 0:
             ax.errorbar(Qs[exclude_from:], (Rs*Qs**power)[exclude_from:], (dRs*Qs**power)[exclude_from:], fmt='o', color='k', markersize=10, alpha=0.7, capsize=8, linewidth=3, zorder=100)
 
