@@ -167,9 +167,9 @@ def compile_data_N(Qbasis, T, dT, L, dL, Ntot, Nbkg, Ninc):
         _normRL = np.histogram(_Q, _Qbasis, weights=1./np.array(dL)**2)[0][nz]
         _T = np.histogram(_Q, _Qbasis, weights=np.array(T)/np.array(dT)**2)[0][nz]/_normR
         _L = np.histogram(_Q, _Qbasis, weights=np.array(L)/np.array(dL)**2)[0][nz]/_normRL
-        _dL = np.ones_like(_L) * np.mean(dL)
+        _dT = np.histogram(_Q, _Qbasis, weights=np.array(dT)/np.array(dT)**2)[0][nz]/_normR
+        _dL = np.histogram(_Q, _Qbasis, weights=np.array(dL)/np.array(dL)**2)[0][nz]/_normRL
         _Q = TL2Q(_T, _L)
-        _dT = np.ones_like(_T) * np.mean(dT)
         _dQ = dTdL2dQ(_T, _dT, _L, _dL)    
 
         return _T, _dT, _L, _dL, _R, _dR, _Q, _dQ
