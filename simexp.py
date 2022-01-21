@@ -441,26 +441,25 @@ class SimReflExperimentControl(SimReflExperiment):
         model_weights = np.array(model_weights) / np.sum(model_weights)
 
         self.meastimeweights = list()
-        for Q, weight in zip(self.measQ, model_weights):
-            self.meastimeweights.append(weight * np.array(Q)**2 / np.sum(np.array(Q)**2))
+        for x, weight in zip(self.x, model_weights):
+            self.meastimeweights.append(weight * np.array(x)**2 / np.sum(np.array(x)**2))
 
     def take_step(self, total_time):
         points = list()
         #TODO: Make this into a (Q to points) function
-        for mnum, (newQ, mtimeweight, meas_bkg, resid_bkg) in enumerate(zip(self.measQ, self.meastimeweights, self.meas_bkg, self.resid_bkg)):
-            newvars = ar.gen_new_variables(newQ)
-            calcR = ar.calc_expected_R(self.calcmodels[mnum].fitness, *newvars, oversampling=self.oversampling)
+        for mnum, (newx, mtimeweight, meas_bkg, resid_bkg) in enumerate(zip(self.x, self.meastimeweights, self.meas_bkg, self.resid_bkg)):
+
+            Ts = self.instrument.T(newx)
+            dTs = self.instrument.dT(newx)
+            Ls = self.instrument.L(newx)
+            dLs = self.instrument.dL(newx)
+            #print(T, dT, L, dL)
+            incident_neutrons = self.instrument.intensity(newx)
+            for x, t, T, dT, L, dL, intens in zip(newx, total_time * mtimeweight, Ts, dTs, Ls, dLs, incident_neutrons):
+                calcR = ar.calc_expected_R(self.calcmodels[mnum].fitness, T, dT, L, dL, oversampling=self.oversampling)
             #print('expected R:', calcR)
-            incident_neutrons = self.intensity(newQ, modelnum=mnum) * total_time * mtimeweight
-            Ns, Nbkgs, Nincs = ar.sim_data_N(calcR, incident_neutrons, meas_bkg=meas_bkg, resid_bkg=resid_bkg)
-            #print(newR, target_incident_neutrons, Ns, Nbkgs, Nincs)
-            Ts = ar.q2a(newQ, self.L)
-            # TODO: Replace with resolution function
-            dTs = np.polyval(np.array([ 2.30358547e-01, -1.18046955e-05]), newQ)
-            Ls = np.ones_like(newQ)*self.L
-            dLs = np.ones_like(newQ)*self.dL
-            for t, T, dT, L, dL, N, Nbkg, Ninc in zip(total_time * mtimeweight, Ts, dTs, Ls, dLs, Ns, Nbkgs, Nincs):
-                points.append(DataPoint(t, mnum, (T, dT, L, dL, N, Nbkg, Ninc)))
+                N, Nbkg, Ninc = ar.sim_data_N(calcR, intens.T * t, resid_bkg=resid_bkg, meas_bkg=meas_bkg)
+                points.append(DataPoint(x, t, mnum, (T, dT, L, dL, N, Nbkg, Ninc)))
         
         self.add_step(points)
 
