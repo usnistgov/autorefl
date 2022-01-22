@@ -64,10 +64,11 @@ def gen_new_variables(newQ):
     
     return T, dT, L, dL
 
-def calc_expected_R(fitness, T, dT, L, dL, oversampling=None):
+def calc_expected_R(fitness, T, dT, L, dL, oversampling=None, resolution='normal'):
     # currently requires sorted values (by Q) because it returns sorted values.
     # this will need to be modified for CANDOR.
     fitness.probe._set_TLR(T, dT, L, dL, R=None, dR=None, dQ=None)
+    fitness.probe.resolution = resolution
     if oversampling is not None:
         fitness.probe.oversample(oversampling)
     fitness.update()

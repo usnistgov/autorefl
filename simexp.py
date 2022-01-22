@@ -252,6 +252,7 @@ class SimReflExperiment(object):
 
         setattr(self.problem, 'calcQs', self.measQ)
         setattr(self.problem, 'oversampling', self.oversampling)
+        setattr(self.problem, 'resolution', self.instrument.resolution)
 
         mapper = MPMapper.start_mapper(self.problem, None, cpus=0)
 
@@ -406,7 +407,7 @@ class SimReflExperiment(object):
             L = self.instrument.L(newx)[0]
             dL = self.instrument.dL(newx)[0]
             #print(T, dT, L, dL)
-            calcR = ar.calc_expected_R(self.calcmodels[mnum].fitness, T, dT, L, dL, oversampling=self.oversampling)
+            calcR = ar.calc_expected_R(self.calcmodels[mnum].fitness, T, dT, L, dL, oversampling=self.oversampling, resolution=self.instrument.resolution)
             #print('expected R:', calcR)
             incident_neutrons = self.instrument.intensity(newx) * new_meastime
             N, Nbkg, Ninc = ar.sim_data_N(calcR, incident_neutrons.T, resid_bkg=self.resid_bkg[mnum], meas_bkg=self.meas_bkg[mnum])
@@ -486,7 +487,7 @@ def _calc_qprofile(calcproblem, point):
     for m, newvar in zip(mlist, newvars):
         calcproblem.setp(point)
         calcproblem.chisq_str()
-        Rth = ar.calc_expected_R(m.fitness, *newvar, oversampling=calcproblem.oversampling)
+        Rth = ar.calc_expected_R(m.fitness, *newvar, oversampling=calcproblem.oversampling, resolution=calcproblem.resolution)
         qprof.append(Rth)
 
     return qprof
