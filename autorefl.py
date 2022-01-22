@@ -174,10 +174,14 @@ def compile_data_N(Qbasis, T, dT, L, dL, Ntot, Nbkg, Ninc):
         _L = np.histogram(_Q, _Qedges, weights=np.array(L)/np.array(dL)**2)[0][nz]/_normRL
         _dT = np.histogram(_Q, _Qedges, weights=np.array(dT)/np.array(dT)**2)[0][nz]/_normR
         _dL = np.histogram(_Q, _Qedges, weights=np.array(dL)/np.array(dL)**2)[0][nz]/_normRL
+
+        # recalculate _Q values so they can be sorted in increasing Q order (required by Refl1D)
         _Q = TL2Q(_T, _L)
         _dQ = dTdL2dQ(_T, _dT, _L, _dL)    
+        idx = np.argsort(_Q)
 
-        return _T, _dT, _L, _dL, _R, _dR, _Q, _dQ
+        # return sorted values
+        return _T[idx], _dT[idx], _L[idx], _dL[idx], _R[idx], _dR[idx], _Q[idx], _dQ[idx]
 
     else:
 
