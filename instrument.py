@@ -152,7 +152,7 @@ class CANDOR(ReflectometerBase):
     def intensity(self, x):
 
         news1 = np.interp(x, self.T_calib, self.s1_spec_calib, left=np.nan, right=np.nan)
-        incident_neutrons = [np.interp(news1, self.s1_intens_calib, intens, left=np.nan, right=np.nan) for intens in self.intens_calib.T]
+        incident_neutrons = [np.interp(news1, self.s1_intens_calib, intens) for intens in self.intens_calib.T]
     
         return np.array(incident_neutrons, ndmin=2).T
 
