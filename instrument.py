@@ -9,6 +9,11 @@ class ReflectometerBase(object):
         self._dL = None
         self.xlabel = ''
         self.name = None
+        self.resolution = 'normal'
+
+        # assumes that the detector arm motion is the slowest component
+        self.movespeed = 1.0 # units of degrees / second for detector arm
+        self.x = None   # current position
 
     def x2q(self, x):
         pass
@@ -37,6 +42,16 @@ class ReflectometerBase(object):
         
         return np.array(np.ones_like(x) * self._dL, ndmin=1)
 
+    def movetime(self, x):
+
+        if self.x is None:
+            return 0
+        else:
+            newT = self.x2a(x)
+            curT = self.x2a(self.x)
+            # calculate 2*theta distance to move
+            d = 2 * (newT - curT)
+            return d / self.movespeed
 
 class MAGIK(ReflectometerBase):
     """ MAGIK Reflectometer
@@ -48,6 +63,7 @@ class MAGIK(ReflectometerBase):
         self.xlabel = r'$Q_z$ (' + u'\u212b' + r'$^{-1}$)'
         self.name = 'MAGIK'
         self.resolution = 'normal'
+        self.movespeed = 0.5
 
         # load calibration files
         # TODO: tie resolution function to instrument geometry or use Reductus data
@@ -109,6 +125,7 @@ class CANDOR(ReflectometerBase):
         self.name = 'CANDOR'
         self.xlabel = r'$\Theta$ $(\degree)$'
         self.resolution = 'uniform'
+        self.movespeed = 0.2
 
         L12 = 4000.
         L2S = 356.
