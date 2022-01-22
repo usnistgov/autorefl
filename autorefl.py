@@ -148,27 +148,32 @@ def compile_data(Qbasis, T, dT, L, dL, R, dR):
     return _T, _dT, _L, _dL, _R, _dR, _Q, _dQ
 
 def compile_data_N(Qbasis, T, dT, L, dL, Ntot, Nbkg, Ninc):
-    _Qbasis = copy.copy(Qbasis)
+    _Qbasis = np.array(copy.copy(Qbasis))
     _Q = TL2Q(T=T, L=L)
     #print('compile_data_N: ', len(_Q), _Q, _Qbasis)
     if len(_Q):
     # make sure end bins contain the first and last Q values (always should)
         _Qbasis[0] = min(min(_Qbasis), min(_Q))
         _Qbasis[-1] = max(max(_Qbasis), max(_Q))
-        _N, _bins = np.histogram(_Q, _Qbasis, weights=Ntot)
-        _Nbkg = np.histogram(_Q, _Qbasis, weights=Nbkg)[0]
-        _norm = np.histogram(_Q, _Qbasis, weights=Ninc)[0]
+        #dQbasis = np.diff(_Qbasis, prepend=_Qbasis[0] - (_Qbasis[1] - _Qbasis[0]))
+        dQbasis = _Qbasis[1:] - _Qbasis[:-1]
+        _Qedges = _Qbasis[:-1] + 0.5 * dQbasis
+        _Qedges = np.insert(_Qedges, 0, _Qbasis[0] - 0.5 * dQbasis[0])
+        _Qedges = np.append(_Qedges, _Qbasis[-1] + 0.5 * dQbasis[-1])
+        _N, _bins = np.histogram(_Q, _Qedges, weights=Ntot)
+        _Nbkg = np.histogram(_Q, _Qedges, weights=Nbkg)[0]
+        _norm = np.histogram(_Q, _Qedges, weights=Ninc)[0]
         nz = _norm.nonzero()
         _R = (_N[nz]-_Nbkg[nz])/_norm[nz]
         _Nmin = np.max(np.vstack(((_N + _Nbkg), np.ones_like(_N))), axis=0)
         _dR = np.sqrt(_Nmin)[nz] / _norm[nz]
         #print(_Q.shape, _dR.shape)
-        _normR = np.histogram(_Q, _Qbasis, weights=1./np.array(dT)**2)[0][nz]
-        _normRL = np.histogram(_Q, _Qbasis, weights=1./np.array(dL)**2)[0][nz]
-        _T = np.histogram(_Q, _Qbasis, weights=np.array(T)/np.array(dT)**2)[0][nz]/_normR
-        _L = np.histogram(_Q, _Qbasis, weights=np.array(L)/np.array(dL)**2)[0][nz]/_normRL
-        _dT = np.histogram(_Q, _Qbasis, weights=np.array(dT)/np.array(dT)**2)[0][nz]/_normR
-        _dL = np.histogram(_Q, _Qbasis, weights=np.array(dL)/np.array(dL)**2)[0][nz]/_normRL
+        _normR = np.histogram(_Q, _Qedges, weights=1./np.array(dT)**2)[0][nz]
+        _normRL = np.histogram(_Q, _Qedges, weights=1./np.array(dL)**2)[0][nz]
+        _T = np.histogram(_Q, _Qedges, weights=np.array(T)/np.array(dT)**2)[0][nz]/_normR
+        _L = np.histogram(_Q, _Qedges, weights=np.array(L)/np.array(dL)**2)[0][nz]/_normRL
+        _dT = np.histogram(_Q, _Qedges, weights=np.array(dT)/np.array(dT)**2)[0][nz]/_normR
+        _dL = np.histogram(_Q, _Qedges, weights=np.array(dL)/np.array(dL)**2)[0][nz]/_normRL
         _Q = TL2Q(_T, _L)
         _dQ = dTdL2dQ(_T, _dT, _L, _dL)    
 
