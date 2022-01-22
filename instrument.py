@@ -47,6 +47,7 @@ class MAGIK(ReflectometerBase):
         self._dL = 0.01648374 * self._L
         self.xlabel = r'$Q_z$ (' + u'\u212b' + r'$^{-1}$)'
         self.name = 'MAGIK'
+        self.resolution = 'normal'
 
         # load calibration files
         # TODO: tie resolution function to instrument geometry or use Reductus data
@@ -107,6 +108,7 @@ class CANDOR(ReflectometerBase):
         
         self.name = 'CANDOR'
         self.xlabel = r'$\Theta$ $(\degree)$'
+        self.resolution = 'uniform'
 
         L12 = 4000.
         L2S = 356.
@@ -151,7 +153,7 @@ class CANDOR(ReflectometerBase):
 
     def intensity(self, x):
 
-        news1 = np.interp(x, self.T_calib, self.s1_spec_calib, left=np.nan, right=np.nan)
+        news1 = np.interp(x, self.T_calib, self.s1_spec_calib)
         incident_neutrons = [np.interp(news1, self.s1_intens_calib, intens) for intens in self.intens_calib.T]
     
         return np.array(incident_neutrons, ndmin=2).T
@@ -162,7 +164,7 @@ class CANDOR(ReflectometerBase):
 
     def dT(self, x):
         x = np.array(x, ndmin=1).T
-        dTs = np.interp(x, self.T_calib, self.angular_resolution_calib, left=np.nan, right=np.nan)
+        dTs = np.interp(x, self.T_calib, self.angular_resolution_calib)
         return np.broadcast_to(dTs, (len(self._L), len(x))).T
 
     def L(self, x):

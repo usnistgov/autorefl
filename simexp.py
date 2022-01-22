@@ -115,6 +115,7 @@ class SimReflExperiment(object):
         self.fit_options = fit_options
         for m in self.models:
             m.fitness.probe.oversample(oversampling)
+            m.fitness.probe.resolution = self.instrument.resolution
             m.fitness.update()
 
         if isinstance(Q, np.ndarray):
@@ -228,6 +229,7 @@ class SimReflExperiment(object):
             mT, mdT, mL, mdL, mR, mdR, mQ, mdQ = self.compile_datapoints(measQ, self.get_all_points(i))
             m.fitness.probe._set_TLR(mT, mdT, mL, mdL, mR, mdR, dQ=None)
             m.fitness.probe.oversample(self.oversampling)
+            m.fitness.probe.resolution = self.instrument.resolution
             m.fitness.update()
         
         self.problem.model_reset()
