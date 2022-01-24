@@ -327,7 +327,7 @@ class SimReflExperiment(object):
 
             newpoint = self.select_new_point(step, start=i)
             if newpoint is not None:
-                newpoint.movet = self.instrument.movetime(newpoint.x)
+                newpoint.movet = self.instrument.movetime(newpoint.x)[0]
                 points.append(newpoint)
                 print('New data point:\t' + repr(newpoint))
                 self.curmodel = newpoint.model
