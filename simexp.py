@@ -103,6 +103,7 @@ class SimReflExperiment(object):
         self.eta = eta
         self.npoints = int(npoints)
         self.switch_penalty = switch_penalty
+        self.switch_time_penalty = 0.0          # turn into parameter later?
         self.min_meas_time = min_meas_time
 
         # Initialize
@@ -297,18 +298,34 @@ class SimReflExperiment(object):
         
         step.foms, step.meastimes = self.calc_foms(step)
 
+        min_meas_times = [np.maximum(np.full_like(meastime, self.min_meas_time), meastime) for meastime in step.meastimes]
+
         points = []
         
         for i in range(self.npoints):
+            # calculate movement time penalty (and time penalty to switch models if applicable)
+            switch_time_penalty = [0.0 if j == self.curmodel else self.switch_time_penalty for j in range(self.nmodels)]
+            movepenalty = [(fom * meastime) / (fom * meastime + self.instrument.movetime(x) + pen) for x, fom, meastime, pen in zip(self.x, step.foms, min_meas_times, switch_time_penalty)]
+
             # all models incur switch penalty except the current one
             spenalty = [1.0 if j == self.curmodel else self.switch_penalty for j in range(self.nmodels)]
-            step.scaled_foms = [fom / pen for fom, pen in zip(step.foms, spenalty)]
+            step.scaled_foms = [fom * movepen / pen for fom, pen, movepen in zip(step.foms, spenalty, movepenalty)]
+
+            if False:
+                for fom, scaled_fom, x in zip(step.foms, step.scaled_foms, self.x):
+                    p = plt.semilogy(x, fom, '--')
+                    plt.semilogy(x, scaled_fom, '-', color=p[0].get_color())
+                
+                plt.show()
 
             newpoint = self.select_new_point(step, start=i)
             if newpoint is not None:
                 points.append(newpoint)
                 print('New data point:\t' + repr(newpoint))
                 self.curmodel = newpoint.model
+
+                # "move" instrument to new location for calculating the next movement penalty
+                self.instrument.x = newpoint.x
             else:
                 break
         

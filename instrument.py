@@ -12,7 +12,9 @@ class ReflectometerBase(object):
         self.resolution = 'normal'
 
         # assumes that the detector arm motion is the slowest component
-        self.movespeed = 1.0 # units of degrees / second for detector arm
+        self.topspeed = 1.0 # units of degrees / second for detector arm
+        self.basespeed = 0.2 # units of degrees / second for detector arm
+        self.acceleration = 0.5 # units of degrees / second^2 for detector arm
         self.x = None   # current position
 
     def x2q(self, x):
@@ -47,11 +49,33 @@ class ReflectometerBase(object):
         if self.x is None:
             return 0
         else:
+            x = np.array(x, ndmin=1)
+
+            # convert x to angle units
             newT = self.x2a(x)
             curT = self.x2a(self.x)
-            # calculate 2*theta distance to move
-            d = 2 * (newT - curT)
-            return d / self.movespeed
+
+            # detector arm motion is 2 * dTheta
+            dx = 2 * np.abs(newT - curT)
+
+            t = np.empty_like(dx)
+
+            # total time that arm is accelerating
+            accel_t = (self.topspeed - self.basespeed) / self.acceleration
+
+            # total distance that can be traversed in one acceleration / deceleration cycle without achieving top speed
+            max_accel_dx = 2 * (0.5 * self.acceleration * accel_t ** 2 + self.basespeed * accel_t)
+
+            # select points in the acceleration only regime
+            accel_crit = (dx < max_accel_dx)
+
+            # top velocity reached
+            t[~accel_crit] = 2 * accel_t + (dx[~accel_crit] - max_accel_dx) / self.topspeed
+
+            # top velocity not reached
+            t[accel_crit] = 2 * self.basespeed / self.acceleration * (-1 + np.sqrt(1 + 2 * (dx[accel_crit] / 2) * self.acceleration / self.basespeed ** 2))
+
+            return t
 
 class MAGIK(ReflectometerBase):
     """ MAGIK Reflectometer
@@ -63,7 +87,13 @@ class MAGIK(ReflectometerBase):
         self.xlabel = r'$Q_z$ (' + u'\u212b' + r'$^{-1}$)'
         self.name = 'MAGIK'
         self.resolution = 'normal'
-        self.movespeed = 0.5
+        self.topspeed = 1.0
+        self.basespeed = 0.2
+        self.acceleration = 0.5
+        # As of 1/24/2022:
+        # Base: 0.2 deg / sec
+        # Acceleration: 0.5 deg / sec^2
+        # Top velocity: 1.0 deg / sec
 
         # load calibration files
         # TODO: tie resolution function to instrument geometry or use Reductus data
@@ -125,7 +155,14 @@ class CANDOR(ReflectometerBase):
         self.name = 'CANDOR'
         self.xlabel = r'$\Theta$ $(\degree)$'
         self.resolution = 'uniform'
-        self.movespeed = 0.2
+        self.topspeed = 2.0
+        self.basespeed = 0.1
+        self.acceleration = 0.1
+        # As of 1/24/2022:
+        # Base: 0.1 deg / sec
+        # Acceleration: 0.1 deg / sec^2
+        # Top velocity: 2.0 deg / sec        
+        # NOTE: dominated by acceleration and base for most moves!!
 
         L12 = 4000.
         L2S = 356.
