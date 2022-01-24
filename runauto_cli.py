@@ -85,9 +85,10 @@ if __name__ == '__main__':
             total_t = 0.0
             k = 0
             while total_t < maxtime:
-                total_t += exp.steps[-1].meastime()
+                total_t += exp.steps[-1].meastime() + exp.steps[-1].movetime()
                 print('Rep: %i, Step: %i, Total time so far: %0.1f' % (kk, k, total_t))
                 exp.fit_step()
+                #exp.instrument.x = None # to turn off movement penalty
                 exp.take_step()
                 exp.save(pathname + '/exp%i.pickle' % kk)
                 k += 1
@@ -106,12 +107,13 @@ if __name__ == '__main__':
         print('Resuming %s from %s...' % (basename, pathname))
         exp = SimReflExperiment.load(args.resume)
 
-        total_t = sum([step.meastime() for step in exp.steps[:-1]])
+        total_t = sum([step.meastime() + step.movetime() for step in exp.steps[:-1]])
         k = len(exp.steps) - 1
         while total_t < maxtime:
-            total_t += exp.steps[-1].meastime()
+            total_t += exp.steps[-1].meastime() + exp.steps[-1].movetime()
             print('Resumed, Step: %i, Total time so far: %0.1f' % (k, total_t))
             exp.fit_step()
+            #exp.instrument.x = None # to turn off movement penalty
             exp.take_step()
             exp.save(pathname + '/' + basename + '_resume.pickle')
             k += 1

@@ -84,7 +84,7 @@ if __name__ == '__main__':
         k = 0
         for meastime in meastimes:
             exp.take_step(meastime)
-            total_t += exp.steps[-1].meastime()
+            total_t += exp.steps[-1].meastime() + exp.steps[-1].movetime()
             print('Rep: %i, Step: %i, Total time so far: %0.1f' % (kk, k, total_t))
             exp.fit_step()
             exp.save(pathname + '/expctrl%i.pickle' % kk)
