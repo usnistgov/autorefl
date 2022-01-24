@@ -466,6 +466,16 @@ class SimReflExperimentControl(SimReflExperiment):
         
         self.add_step(points)
 
+def magik_intensity(Q, modelnum=None):
+    # gives counts / second as a function of Q for MAGIK
+    # for back compatibility only, now use instrument.py
+    ps1 = np.array([ 1.35295366e+01, -9.99016840e-04])
+    p_intens = np.array([ 5.56637543e+02,  7.27944632e+04,  2.13479802e+02, -4.37052050e+01])
+    news1 = np.polyval(ps1, Q)
+    incident_neutrons = np.polyval(p_intens, news1)
+
+    return incident_neutrons
+
 def _MP_calc_qprofile(problem_point_pair):
     # given a problem and a sample draw and a Q-vector, calculate the profiles associated with each sample
     problem_id, point = problem_point_pair
