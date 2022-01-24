@@ -22,10 +22,10 @@ fit_options = {'pop': 10, 'burn': 1000, 'steps': 500, 'init': 'lhs', 'alpha': 0.
 
 class DataPoint(object):
     """ Container object for single data point. All inputs should be as lists or ndarrays with min dimension 1"""
-    def __init__(self, x, meastime, modelnum, data, merit=None):
+    def __init__(self, x, meastime, modelnum, data, merit=None, movet=0.0):
         self.model = modelnum
         self.t = meastime
-        self.movet = 0.0
+        self.movet = movet
         self.merit = merit
         self.x = x
         self._data = None
@@ -487,7 +487,8 @@ class SimReflExperimentControl(SimReflExperiment):
                 calcR = ar.calc_expected_R(self.calcmodels[mnum].fitness, T, dT, L, dL, oversampling=self.oversampling, resolution='normal')
             #print('expected R:', calcR)
                 N, Nbkg, Ninc = ar.sim_data_N(calcR, intens.T * t, resid_bkg=resid_bkg, meas_bkg=meas_bkg)
-                points.append(DataPoint(x, t, mnum, (T, dT, L, dL, N, Nbkg, Ninc)))
+                points.append(DataPoint(x, t, mnum, (T, dT, L, dL, N, Nbkg, Ninc), movet=self.instrument.movetime(x)[0]))
+                self.instrument.x = x
         
         self.add_step(points)
 
