@@ -312,7 +312,7 @@ class SimReflExperiment(object):
         for i in range(self.npoints):
             # calculate movement time penalty (and time penalty to switch models if applicable)
             switch_time_penalty = [0.0 if j == self.curmodel else self.switch_time_penalty for j in range(self.nmodels)]
-            movepenalty = [meastime / (meastime + self.instrument.movetime(x) + pen) for x, meastime, pen in zip(self.x, step.foms, min_meas_times, switch_time_penalty)]
+            movepenalty = [meastime / (meastime + self.instrument.movetime(x) + pen) for x, meastime, pen in zip(self.x, min_meas_times, switch_time_penalty)]
 
             # all models incur switch penalty except the current one
             spenalty = [1.0 if j == self.curmodel else self.switch_penalty for j in range(self.nmodels)]
