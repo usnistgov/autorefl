@@ -407,7 +407,7 @@ class SimReflExperiment(object):
             L = self.instrument.L(newx)[0]
             dL = self.instrument.dL(newx)[0]
             #print(T, dT, L, dL)
-            calcR = ar.calc_expected_R(self.calcmodels[mnum].fitness, T, dT, L, dL, oversampling=self.oversampling, resolution=self.instrument.resolution)
+            calcR = ar.calc_expected_R(self.calcmodels[mnum].fitness, T, dT, L, dL, oversampling=self.oversampling, resolution='normal')
             #print('expected R:', calcR)
             incident_neutrons = self.instrument.intensity(newx) * new_meastime
             N, Nbkg, Ninc = ar.sim_data_N(calcR, incident_neutrons.T, resid_bkg=self.resid_bkg[mnum], meas_bkg=self.meas_bkg[mnum])
@@ -459,7 +459,7 @@ class SimReflExperimentControl(SimReflExperiment):
             #print(T, dT, L, dL)
             incident_neutrons = self.instrument.intensity(newx)
             for x, t, T, dT, L, dL, intens in zip(newx, total_time * mtimeweight, Ts, dTs, Ls, dLs, incident_neutrons):
-                calcR = ar.calc_expected_R(self.calcmodels[mnum].fitness, T, dT, L, dL, oversampling=self.oversampling)
+                calcR = ar.calc_expected_R(self.calcmodels[mnum].fitness, T, dT, L, dL, oversampling=self.oversampling, resolution='normal')
             #print('expected R:', calcR)
                 N, Nbkg, Ninc = ar.sim_data_N(calcR, intens.T * t, resid_bkg=resid_bkg, meas_bkg=meas_bkg)
                 points.append(DataPoint(x, t, mnum, (T, dT, L, dL, N, Nbkg, Ninc)))
