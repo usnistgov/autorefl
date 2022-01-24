@@ -531,7 +531,7 @@ def _calc_qprofile(calcproblem, point):
 
 def load_entropy(steps):
 
-    allt = np.cumsum([step.meastime() for step in steps])
+    allt = np.cumsum([step.meastime() + step.movetime() for step in steps])
     allH = [step.dH for step in steps]
     allH_marg = [step.dH_marg for step in steps]
 
