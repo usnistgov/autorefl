@@ -25,6 +25,7 @@ class DataPoint(object):
     def __init__(self, x, meastime, modelnum, data, merit=None):
         self.model = modelnum
         self.t = meastime
+        self.movet = 0.0
         self.merit = merit
         self.x = x
         self._data = None
@@ -83,6 +84,12 @@ class ExperimentStep(object):
             return sum([pt.t for pt in self.points])
         else:
             return sum([pt.t for pt in self.points if pt.model == modelnum])
+
+    def movetime(self, modelnum=None):
+        if modelnum is None:
+            return sum([pt.movet for pt in self.points])
+        else:
+            return sum([pt.movet for pt in self.points if pt.model == modelnum])
 
 
 class SimReflExperiment(object):
@@ -320,6 +327,7 @@ class SimReflExperiment(object):
 
             newpoint = self.select_new_point(step, start=i)
             if newpoint is not None:
+                newpoint.movet = self.instrument.movetime(newpoint.x)
                 points.append(newpoint)
                 print('New data point:\t' + repr(newpoint))
                 self.curmodel = newpoint.model
@@ -541,6 +549,7 @@ def snapshot(exp, stepnumber, fig=None, power=4, tscale='log'):
     step = exp.steps[j]
 
     steptimes = [sum([step.meastime(modelnum=i) for step in exp.steps[:(j+1)]]) for i in range(exp.nmodels)]
+    movetimes = [sum([step.movetime(modelnum=i) for step in exp.steps[:(j+1)]]) for i in range(exp.nmodels)]
 
     axtopright = fig.add_subplot(gsright[0,-1])
     axbotright = fig.add_subplot(gsright[1,-1], sharex=axtopright)
@@ -569,7 +578,7 @@ def snapshot(exp, stepnumber, fig=None, power=4, tscale='log'):
         #idata = [[getattr(pt, attr) for pt in plotpoints] for attr in exp.attr_list]
         idata = [[val for pt in plotpoints for val in getattr(pt, attr)] for attr in exp.attr_list]
         ar.plot_qprofiles(copy.copy(measQ), qprof, step.draw.logp, data=idata, ax=axtop, power=power)
-        axtop.set_title('t = %0.0f s' % steptimes[i], fontsize='larger')
+        axtop.set_title(f'meas t = {steptimes[i]:0.0f} s\nmove t = {movetimes[i]:0.0f} s', fontsize='larger')
         axbot.semilogy(x, fom, linewidth=3, color='C0')
         if (j + 1) < len(exp.steps):
             newpoints = [pt for pt in exp.steps[j+1].points if ((pt.model == i) & (pt.merit is not None))]
@@ -600,7 +609,7 @@ def snapshot(exp, stepnumber, fig=None, power=4, tscale='log'):
     axtops[0].tick_params(labelleft=True)
     axbots[0].tick_params(labelleft=True)
 
-    fig.suptitle('t = %0.0f s' % sum(steptimes), fontsize='larger', fontweight='bold')
+    fig.suptitle(f'measurement time = {sum(steptimes):0.0f} s\nmovement time = {sum(movetimes):0.0f} s', fontsize='larger', fontweight='bold')
 
     return fig, (axtops, axbots, axtopright, axbotright)
 
