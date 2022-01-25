@@ -13,6 +13,163 @@ from matplotlib import cm, colors
 from bumps.mapper import MPMapper, can_pickle, SerialMapper
 from sklearn.linear_model import LinearRegression
 from scipy.stats import poisson
+from reflred.candor import edges, QData
+from reflred.refldata import ReflData, Sample, Detector, Intent, Monochromator
+from reflred.background import subtract_background
+from dataflow.lib.uncertainty import Uncertainty as U
+
+def _rebin_bank(data, bank, q_edges, average):
+    """
+    Merge q points across channels and angles, returning q, dq, v, dv.
+
+    Intensities (v, dv) are combined using poisson averaging.
+
+    Q values (Q, dQ) for the combined measurements are weighted by intensity.
+    This means that identical measurement conditions may give different
+    (Q, dQ) depending on the specific values measured.
+
+    The following are computed from the combined points::
+
+        [q] = <q> = <4π/λ sin(θ)>
+        [λ] = 1/<1/λ>
+        [θ] = arcsin([q] [λ] / 4π)
+        [Δq]² = <q √ {(Δλ/λ)² + (Δθ/tan θ)²}> + <q²> - <q>²
+        [Δλ]² = <Δλ²> + <λ²> - <λ>²
+        [Δθ]² = <Δθ²>
+        [q'] = 4π/[λ] sin([θ] + δ)                     for θ-offset δ
+        [Δq']² = [Δq]² + ([q]/tan[θ])² (2ω [Δθ] + ω²)  for sample broadening ω
+
+    The result for [q'] and [Δq'] are with 1% over a wide range of angles
+    and slits. Only small θ-offset values were checked since large errors
+    in incident angle are readily visible in the data. The reflectivity curves
+    will be clearly misaligned especially near the critical edge for θ-offset
+    above about 0.1°. Large values of sample broadening are supported, with
+    up to 2° tested. Negative sample broadening will lead to anomalies at low
+    angles.
+
+    The <q²> - <q>² term in [Δq] comes from the formula for variance in a
+    mixture distribution, which averages the variances of the individual
+    distributions and adds a spread term in case the means are not overlapping.
+    See <https://en.wikipedia.org/wiki/Mixture_distribution#Moments>_.
+
+    The sample broadening formula [Δq'] comes from substituting Δθ+ω for Δθ
+    in [Δq] and expanding the square. By using [Δq]² to compute [Δq']², the
+    spread term is automatically incorporated. This change may require updates
+    to the fitting software, which compute [Δq'] from (θ,λ,Δθ,Δλ) directly.
+
+    Since θ and λ are completely correlated based on the q value each bin
+    has thin resolution function following the constant q curve on a θ-λ plot.
+    The resulting Δq is smaller than would be expected from the full Δθ and Δλ
+    within the bin.
+
+    Since the distribution is not a simple gaussian, we are free to choose
+    [θ], [λ], [Δθ] and [Δλ] in a way that is convenient for fitting.  Choosing
+    wavelength based on the average of the inverse, and angle so that it
+    matches the corresponding [q] works well for computing θ-offset.
+    Using this [θ] and averaging the variance for [Δθ] works well for
+    estimating the effects of sample broadening.
+
+    The [Δλ] term is set from the second central moment from the mixture
+    distribution. This gives some idea of the range of wavelengths included
+    in each [q], but it is not not directly useful. To properly fit data in
+    which reflectivity is wavelength dependent the correct wavelength
+    distribution is needed, not just the first and second moment. Because
+    points with different intensity are combined, even knowing that incident
+    wavelength follows a truncated Maxwell-Boltzmann distribution with a
+    given temperature is not enough to reconstruct the measured distribution.
+    In these situations measure fewer angles for longer without binning the
+    data so that you can ignore wavelength variation within each theory value.
+    """
+    # Make all data have the same shape
+    columns = (
+        data.Qz, data.dQ, data.v, data.dv,
+        data.Ti, data.angular_resolution, data.Ld, data.dL)
+    columns = [np.broadcast_to(p, data.v.shape) for p in columns]
+    columns = [p[:, :, bank].flatten() for p in columns]
+    q, dq, y, dy, T, dT, L, dL = columns
+
+    # Sort q values into bins
+    nbins = len(q_edges) - 1
+    bin_index = np.searchsorted(q_edges, q) - 1
+
+    # Some bins may not have any points contributing, such as those before
+    # and after, or those in the middle if the q-step is too fine. These
+    # will be excluded from the final result.
+    points_per_bin = np.bincount(bin_index, minlength=nbins)
+    # Note: we add empty_q to the divisor in a number of places to protect
+    # against divide by zero in those bins. Since we are excluding these at
+    # the end, this removes the spurious warnings without changing results.
+    empty_q = (points_per_bin == 0)
+    # The following is cribbed from util.poisson_average, replacing
+    # np.sum with np.bincount.
+    # TODO: update poisson average so it handles grouping
+    norm = data.normbase
+    if average == "gauss":
+        dy = dy + (dy == 0) # protect against zero uncertainty
+        Swx = np.bincount(bin_index, weights=y/dy**2, minlength=nbins)
+        Sw = np.bincount(bin_index, weights=dy**-2, minlength=nbins)
+        Sw += empty_q  # Protect against division by zero
+        bar_y = Swx / Sw
+        bar_dy = 1/np.sqrt(Sw)
+    elif norm == "none":
+        bar_y = np.bincount(bin_index, weights=y, minlength=nbins)
+        bar_dy = np.sqrt(np.bincount(bin_index, weights=dy**2, minlength=nbins))
+    else:
+        # Counts must be positive for poisson averaging...
+        y = y.copy()
+        y[y < 0] = 0.
+        dy = dy + (dy == 0) # protect against zero uncertainty
+        monitors = y*(y+1)/dy**2 if norm == "monitor" else y/dy**2 # if "time"
+        monitors[y == 0] = 1./dy[y == 0] # protect against zero counts
+        counts = y*monitors
+        combined_monitors = np.bincount(bin_index, weights=monitors, minlength=nbins)
+        combined_counts = np.bincount(bin_index, weights=counts, minlength=nbins)
+        combined_monitors += empty_q  # Protect against division by zero
+        bar_y = combined_counts/combined_monitors
+        if norm == "time":
+            bar_dy = np.sqrt(bar_y / combined_monitors)
+        else:
+            bar_dy = 1./combined_monitors * np.sqrt(1. + 1./combined_monitors)
+            idx = (bar_y != 0)
+            bar_dy[idx] = bar_y[idx] * np.sqrt(1./combined_counts[idx]
+                                               + 1./combined_monitors[idx])
+
+    # Find Q center and resolution, weighting by intensity
+    w = np.ones_like(y)  # Weights must be positive; use equal weights for now
+    #w = y # use intensity weighting when finding q centers
+    sum_w = np.bincount(bin_index, weights=w, minlength=nbins)
+    #assert ((sum_w == 0) == empty_q).all()
+    sum_w += empty_q  # protect against divide by zero
+    sum_q = np.bincount(bin_index, weights=q*w, minlength=nbins)
+    bar_q = sum_q / sum_w
+    # Combined dq according to mixture distribution.
+    sum_dqsq = np.bincount(bin_index, weights=w*(dq**2 + q**2), minlength=nbins)
+    bar_dq = np.sqrt(sum_dqsq/sum_w - bar_q**2)
+    ## Combined dq according average of variance.
+    #bar_dq = np.sqrt(np.bincount(bin_index, weights=dq*w, minlength=nbins)/bar_w)
+    # Set dq to 1% for now...
+    #bar_dq = bar_q*0.01
+
+    # Combine wavelengths
+    sum_Linv = np.bincount(bin_index, weights=w/L, minlength=nbins)
+    #assert ((sum_Linv == 0) == empty_q).all()
+    sum_Linv += empty_q  # protect against divide by zero
+    bar_Linv = sum_w/sum_Linv  # Not the first moment of L
+    sum_L = np.bincount(bin_index, weights=w*L, minlength=nbins)
+    sum_dLsq = np.bincount(bin_index, weights=w*(dL**2+L**2), minlength=nbins)
+    bar_dL = np.sqrt(sum_dLsq/sum_w - (sum_L/sum_w)**2)
+
+    # Combine angles
+    bar_T = np.degrees(np.arcsin(bar_q*bar_Linv / 4 / np.pi))
+    sum_dT = np.bincount(bin_index, weights=w*dT**2, minlength=nbins)
+    bar_dT = np.sqrt(sum_dT/sum_w)
+
+    # Need to drop catch-all bins before and after q edges.
+    # Also need to drop q bins which don't contain any values.
+    keep = ~empty_q
+    keep[0] = keep[-1] = False
+    columns = (bar_q, bar_dq, bar_y, bar_dy, bar_T, bar_dT, bar_Linv, bar_dL)
+    return [p[keep] for p in columns]
 
 d_intens = np.loadtxt('calibration/magik_intensity_hw106.refl')
 
@@ -149,6 +306,45 @@ def compile_data(Qbasis, T, dT, L, dL, R, dR):
     return _T, _dT, _L, _dL, _R, _dR, _Q, _dQ
 
 def compile_data_N(Qbasis, T, dT, L, dL, Ntot, Nbkg, Ninc):
+    if len(T):
+        T, dT, L, dL, Ntot, Nbkg, Ninc = [np.array(a) for a in (T, dT, L, dL, Ntot, Nbkg, Ninc)]
+        Ninc = np.round(Ninc)
+        #print(T, dT, L, dL, Ntot, Nbkg, Ninc)
+        q_edges = edges(Qbasis, extended=True)
+
+        #_Q = TL2Q(T, L)
+        #_dQ = dTdL2dQ(T, dT, L, dL)
+        v = Ntot/Ninc
+        dv = v * np.sqrt(1./np.maximum(Ntot, np.ones_like(Ntot)) + 1./Ninc)
+        vbkg = Nbkg/Ninc
+        dvbkg = vbkg * np.sqrt(1./np.maximum(Nbkg, np.ones_like(Nbkg)) + 1./Ninc)
+        spec = ReflData(monochromator=Monochromator(wavelength=L[:,None,None], wavelength_resolution=dL[:,None,None]),
+                        sample=Sample(angle_x=T[:,None,None]),
+                        angular_resolution=dT[:,None,None],
+                        detector=Detector(angle_x=2*T[:,None,None], wavelength=L[:,None,None], wavelength_resolution=dL[:,None,None]),
+                        _v=v[:,None,None], _dv=dv[:,None,None], Qz_basis='actual')
+        bkg = ReflData(monochromator=Monochromator(wavelength=L[:,None,None], wavelength_resolution=dL[:,None,None]),
+                        sample=Sample(angle_x=T[:,None,None]),
+                        angular_resolution=dT[:,None,None],
+                        detector=Detector(angle_x=2*T[:,None,None], wavelength=L[:,None,None], wavelength_resolution=dL[:,None,None]),
+                        _v=vbkg[:, None, None], _dv=dvbkg[:,None, None], Qz_basis='actual')
+        spec_rebin = _rebin_bank(spec, 0, q_edges, 'poisson')
+        spec2 = QData(spec, *spec_rebin)
+        bkg_rebin = _rebin_bank(bkg, 0, q_edges, 'poisson')
+        bkg2 = QData(bkg, *bkg_rebin)
+        bkg2.intent = Intent.back
+
+        vsub, dvsub2 = subtract_background(spec2, bkg2, None)
+
+        qz, dq, _, _, _Ti, _dT, _L, _dL = spec_rebin
+
+        return _Ti, _dT, _L, _dL, vsub, np.sqrt(dvsub2), qz, dq
+
+    else:
+
+        return tuple([np.array([]) for _ in range(8)])
+
+def old_compile_data_N(Qbasis, T, dT, L, dL, Ntot, Nbkg, Ninc):
     _Qbasis = np.array(copy.copy(Qbasis))
     _Q = TL2Q(T=T, L=L)
     #print('compile_data_N: ', len(_Q), _Q, _Qbasis)

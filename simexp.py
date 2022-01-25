@@ -235,7 +235,7 @@ class SimReflExperiment(object):
 
         for i, (m, measQ) in enumerate(zip(self.models, self.measQ)):
             mT, mdT, mL, mdL, mR, mdR, mQ, mdQ = self.compile_datapoints(measQ, self.get_all_points(i))
-            m.fitness.probe._set_TLR(mT, mdT, mL, mdL, mR, mdR, dQ=None)
+            m.fitness.probe._set_TLR(mT, mdT, mL, mdL, mR, mdR, dQ=mdQ)
             m.fitness.probe.oversample(self.oversampling)
             m.fitness.probe.resolution = self.instrument.resolution
             m.fitness.update()
