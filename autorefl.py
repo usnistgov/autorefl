@@ -274,7 +274,7 @@ def plot_qprofiles(Qth, qprofs, logps, data=None, ax=None, exclude_from=0, power
         _, _, _, _, Rs, dRs, Qs, _ = compile_data_N(Qth, *data)
         #print('plot_qprofiles: ', len(Qs), Qs)
         if len(Qs) > 0:
-            ax.errorbar(Qs[exclude_from:], (Rs*Qs**power)[exclude_from:], (dRs*Qs**power)[exclude_from:], fmt='o', color='k', markersize=10, alpha=0.2, capsize=8, linewidth=3, zorder=100)
+            ax.errorbar(Qs[exclude_from:], (Rs*Qs**power)[exclude_from:], (dRs*Qs**power)[exclude_from:], fmt='o', color='k', markersize=10, alpha=0.4, capsize=8, linewidth=3, zorder=100)
 
     cmin, cmax = np.median(logps) + 2 * np.std(logps) * np.array([-1,1])
     colornorm = colors.Normalize(vmin=cmin, vmax=cmax)
