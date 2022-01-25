@@ -81,6 +81,7 @@ if __name__ == '__main__':
 
         for kk in range(nrepeats):
             exp = SimReflExperiment(model, measQ, instrument=instr, eta=eta, fit_options=fit_options, oversampling=11, bestpars=bestp, select_pars=sel, meas_bkg=[3e-6, 3e-5], switch_penalty=penalty)
+            exp.switch_time_penalty = 0.0 # takes 5 minutes to switch models
             exp.add_initial_step()
             total_t = 0.0
             k = 0

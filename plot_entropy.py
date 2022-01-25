@@ -23,7 +23,7 @@ def combinedata(explist, controls=False):
 
     for expname in explist:
         exp = ctype.load(expname)
-        allt, allH, allH_marg = load_entropy(exp.steps[:-1]) if not controls else load_entropy(exp.steps)
+        allt, allH, allH_marg = load_entropy(exp.steps[:-1]) if not controls else load_entropy(exp.steps, control=True)
         allts.append(allt)
         allHs.append(allH)
         allHs_marg.append(allH_marg)
@@ -60,10 +60,12 @@ if __name__ == '__main__':
     tscale ='log'
 
 
-    exps = glob.glob('eta0.[2-7,9]*')
-    exps.append('eta0.80_npoints1_repeats1_20220115T194944')
-    exps.sort()
-    expctrls = ['control_20220118T180210']
+#    exps = glob.glob('eta0.[2-7,9]*')
+#    exps.append('eta0.80_npoints1_repeats1_20220115T194944')
+#    exps.sort()
+    exps = glob.glob('MAGIK_eta0.8*')
+#    expctrls = ['control_20220118T180210']
+    expctrls = ['MAGIK_control_20220125T010413']
     colors = ['C%i' % i for i in range(10)]
 
     fig, (axm, ax) = plt.subplots(2, 1, sharex=True, gridspec_kw={'hspace': 0}, figsize=(8, 10))

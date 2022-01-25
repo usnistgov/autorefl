@@ -529,9 +529,13 @@ def _calc_qprofile(calcproblem, point):
     return qprof
 
 
-def load_entropy(steps):
+def load_entropy(steps, control=False):
 
-    allt = np.cumsum([step.meastime() + step.movetime() for step in steps])
+    if not control:
+        allt = np.cumsum([step.meastime() + step.movetime() for step in steps])
+    else:
+        # assume all movement was done only once
+        allt = np.cumsum([step.meastime() for step in steps]) + np.array([step.movetime() for step in steps])
     allH = [step.dH for step in steps]
     allH_marg = [step.dH_marg for step in steps]
 
@@ -626,7 +630,7 @@ def makemovie(exp, outfilename, expctrl=None, fps=1, fmt='gif', power=4, tscale=
         fig, (_, _, axtopright, axbotright) = snapshot(exp, j, fig=fig, power=power, tscale=tscale)
 
         if expctrl is not None:
-            allt, allH, allH_marg = load_entropy(expctrl.steps)
+            allt, allH, allH_marg = load_entropy(expctrl.steps, control=True)
             axtopright.plot(allt, allH_marg, 'o-', color='0.1')
             axbotright.plot(allt, allH, 'o-', color='0.1')
 
