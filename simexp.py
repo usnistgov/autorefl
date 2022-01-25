@@ -16,30 +16,29 @@ from matplotlib.gridspec import GridSpec
 from sklearn.linear_model import LinearRegression
 #from scipy.stats import poisson
 import autorefl as ar
+import instrument
 
 fit_options = {'pop': 10, 'burn': 1000, 'steps': 500, 'init': 'lhs', 'alpha': 0.001}
 
-def magik_intensity(Q, modelnum=None):
-    # gives counts / second as a function of Q for MAGIK
-    ps1 = np.array([ 1.35295366e+01, -9.99016840e-04])
-    p_intens = np.array([ 5.56637543e+02,  7.27944632e+04,  2.13479802e+02, -4.37052050e+01])
-    news1 = np.polyval(ps1, Q)
-    incident_neutrons = np.polyval(p_intens, news1)
-    
-    return incident_neutrons
-
 class DataPoint(object):
-    """ Container object for single data point"""
-    def __init__(self, meastime, modelnum, data, merit=None):
+    """ Container object for single data point. All inputs should be as lists or ndarrays with min dimension 1"""
+    def __init__(self, x, meastime, modelnum, data, merit=None, movet=0.0):
         self.model = modelnum
         self.t = meastime
+        self.movet = movet
         self.merit = merit
+        self.x = x
         self._data = None
         self.data = data
 
     def __repr__(self):
-        # TODO: fix this for multiple data points
-        return 'Model: %i\tQ: %0.4f Ang^-1\tTime: %0.1f s' % (self.model, self.Q(), self.t)
+
+        try:
+            reprq = 'Q: %0.4f Ang^-1' % self.Q()
+        except TypeError:
+            reprq = 'Q: ' + ', '.join('{:0.4f}'.format(q) for q in self.Q()) + ' Ang^-1'
+        
+        return ('Model: %i\t' % self.model) + reprq + ('\tTime: %0.1f s' %  self.t)
 
     @property
     def data(self):
@@ -86,10 +85,16 @@ class ExperimentStep(object):
         else:
             return sum([pt.t for pt in self.points if pt.model == modelnum])
 
+    def movetime(self, modelnum=None):
+        if modelnum is None:
+            return sum([pt.movet for pt in self.points])
+        else:
+            return sum([pt.movet for pt in self.points if pt.model == modelnum])
+
 
 class SimReflExperiment(object):
 
-    def __init__(self, problem, Q, f_intensity=magik_intensity, eta=0.8, npoints=1, switch_penalty=1, bestpars=None, fit_options=fit_options, oversampling=11, meas_bkg=1e-6, startmodel=0, min_meas_time=10, select_pars=None) -> None:
+    def __init__(self, problem, Q, instrument=instrument.MAGIK(), eta=0.8, npoints=1, switch_penalty=1, bestpars=None, fit_options=fit_options, oversampling=11, meas_bkg=1e-6, startmodel=0, min_meas_time=10, select_pars=None) -> None:
         # running list of options: oversampling, background x nmodels, minQ, maxQ, fit_options, startmodel, wavelength
         # more options: eta, npoints, (nrepeats not necessary because multiple objects can be made and run), switch_penalty, min_meas_time
         # problem is the FitProblem object to simulate
@@ -98,10 +103,14 @@ class SimReflExperiment(object):
         
         self.attr_list = ['T', 'dT', 'L', 'dL', 'N', 'Nbkg', 'Ninc']
 
+        # Load instrument
+        self.instrument = instrument
+
         # Analysis options
         self.eta = eta
         self.npoints = int(npoints)
         self.switch_penalty = switch_penalty
+        self.switch_time_penalty = 0.0          # turn into parameter later?
         self.min_meas_time = min_meas_time
 
         # Initialize
@@ -114,11 +123,8 @@ class SimReflExperiment(object):
         self.fit_options = fit_options
         for m in self.models:
             m.fitness.probe.oversample(oversampling)
+            m.fitness.probe.resolution = self.instrument.resolution
             m.fitness.update()
-
-        self.intensity = f_intensity
-        self.L = 5.0
-        self.dL = 0.01648374 * self.L
 
         if isinstance(Q, np.ndarray):
             if len(Q.shape) == 1:
@@ -134,6 +140,12 @@ class SimReflExperiment(object):
                 self.measQ = Q
             else:
                 self.measQ = [Q for _ in range(self.nmodels)]
+
+        # define measurement space. Contains same number of points per model as self.measQ
+        self.x = list()
+        for Q in self.measQ:
+            minx, maxx = self.instrument.qrange2xrange([min(Q), max(Q)])
+            self.x.append(np.linspace(minx, maxx, len(Q), endpoint=True))
 
         self.npars = len(problem.getp())
         self.orgQ = [list(m.fitness.probe.Q) for m in models]
@@ -188,9 +200,9 @@ class SimReflExperiment(object):
 
     def compile_datapoints(self, Qbasis, points):
 
-        idata = [[getattr(pt, attr) for pt in points] for attr in self.attr_list]
+        idata = [[val for pt in points for val in getattr(pt, attr)] for attr in self.attr_list]
 
-        return ar.compile_data_N(copy.copy(Qbasis), *idata)
+        return ar.compile_data_N(Qbasis, *idata)
 
     def add_initial_step(self, dRoR=10.0):
 
@@ -198,27 +210,24 @@ class SimReflExperiment(object):
         # in Refl1D (probably not strictly required for DREAM fit)
         nQs = [((self.npars + 1) // self.nmodels) + 1 if i < ((self.npars + 1) % self.nmodels) else ((self.npars + 1) // self.nmodels) for i in range(self.nmodels)]
         newQs = [np.linspace(min(Qvec), max(Qvec), nQ) for nQ, Qvec in zip(nQs, self.measQ)]
-        new_meastimes = [np.zeros_like(newQ) for newQ in newQs]
-        newfoms = [np.zeros_like(newQ) for newQ in newQs]
 
         initpts = generate(self.problem, init='lhs', pop=self.fit_options['pop'], use_point=False)
         init_qprof, _ = ar.calc_qprofiles(self.problem, initpts, newQs)
     
         points = []
 
-        for mnum, (newQ, mtime, mfom, qprof, meas_bkg, resid_bkg) in enumerate(zip(newQs, new_meastimes, newfoms, init_qprof, self.meas_bkg, self.resid_bkg)):
+        for mnum, (newQ, qprof, meas_bkg, resid_bkg) in enumerate(zip(newQs, init_qprof, self.meas_bkg, self.resid_bkg)):
             newR, newdR = np.mean(qprof, axis=0), dRoR * np.std(qprof, axis=0)
             targetN = (newR / newdR) ** 2
             target_incident_neutrons = targetN / newR
             Ns, Nbkgs, Nincs = ar.sim_data_N(newR, target_incident_neutrons, resid_bkg=resid_bkg, meas_bkg=meas_bkg)
             #print(newR, target_incident_neutrons, Ns, Nbkgs, Nincs)
-            Ts = ar.q2a(newQ, self.L)
-            # TODO: Replace with resolution function
+            Ts = ar.q2a(newQ, 5.0)
+            # Resolution function doesn't matter here at all because these points don't have any effect
             dTs = np.polyval(np.array([ 2.30358547e-01, -1.18046955e-05]), newQ)
-            Ls = np.ones_like(newQ)*self.L
-            dLs = np.ones_like(newQ)*self.dL
-            for t, T, dT, L, dL, N, Nbkg, Ninc, fom in zip(mtime, Ts, dTs, Ls, dLs, Ns, Nbkgs, Nincs, mfom):
-                points.append(DataPoint(t, mnum, (T, dT, L, dL, N, Nbkg, Ninc), merit=fom))
+            Ls = np.ones_like(newQ)*5.0
+            dLs = np.ones_like(newQ)*0.01648374 * 5.0
+            points.append(DataPoint(0.0, 0.0, mnum, (Ts, dTs, Ls, dLs, Ns, Nbkgs, Nincs)))
 
         self.add_step(points, use=False)
 
@@ -228,6 +237,7 @@ class SimReflExperiment(object):
             mT, mdT, mL, mdL, mR, mdR, mQ, mdQ = self.compile_datapoints(measQ, self.get_all_points(i))
             m.fitness.probe._set_TLR(mT, mdT, mL, mdL, mR, mdR, dQ=None)
             m.fitness.probe.oversample(self.oversampling)
+            m.fitness.probe.resolution = self.instrument.resolution
             m.fitness.update()
         
         self.problem.model_reset()
@@ -250,6 +260,7 @@ class SimReflExperiment(object):
 
         setattr(self.problem, 'calcQs', self.measQ)
         setattr(self.problem, 'oversampling', self.oversampling)
+        setattr(self.problem, 'resolution', self.instrument.resolution)
 
         mapper = MPMapper.start_mapper(self.problem, None, cpus=0)
 
@@ -294,18 +305,35 @@ class SimReflExperiment(object):
         
         step.foms, step.meastimes = self.calc_foms(step)
 
+        min_meas_times = [np.maximum(np.full_like(meastime, self.min_meas_time), meastime) for meastime in step.meastimes]
+
         points = []
         
         for i in range(self.npoints):
+            # calculate movement time penalty (and time penalty to switch models if applicable)
+            switch_time_penalty = [0.0 if j == self.curmodel else self.switch_time_penalty for j in range(self.nmodels)]
+            movepenalty = [meastime / (meastime + self.instrument.movetime(x) + pen) for x, meastime, pen in zip(self.x, min_meas_times, switch_time_penalty)]
+
             # all models incur switch penalty except the current one
             spenalty = [1.0 if j == self.curmodel else self.switch_penalty for j in range(self.nmodels)]
-            step.scaled_foms = [fom / pen for fom, pen in zip(step.foms, spenalty)]
+            step.scaled_foms = [fom * movepen / pen for fom, pen, movepen in zip(step.foms, spenalty, movepenalty)]
+
+            if False:
+                for fom, scaled_fom, x in zip(step.foms, step.scaled_foms, self.x):
+                    p = plt.semilogy(x, fom, '--')
+                    plt.semilogy(x, scaled_fom, '-', color=p[0].get_color())
+                
+                plt.show()
 
             newpoint = self.select_new_point(step, start=i)
             if newpoint is not None:
+                newpoint.movet = self.instrument.movetime(newpoint.x)[0]
                 points.append(newpoint)
                 print('New data point:\t' + repr(newpoint))
                 self.curmodel = newpoint.model
+
+                # "move" instrument to new location for calculating the next movement penalty
+                self.instrument.x = newpoint.x
             else:
                 break
         
@@ -320,25 +348,22 @@ class SimReflExperiment(object):
         # define parameter numbers to select
         pts = step.draw.points[:,self.sel]
 
-        # alternative approach
         foms = list()
         meas_times = list()
-        for mnum, (m, Qth, qprof, qbkg) in enumerate(zip(self.models, self.measQ, step.qprofs, self.meas_bkg)):
+        for mnum, (m, xs, Qth, qprof, qbkg) in enumerate(zip(self.models, self.x, self.measQ, step.qprofs, self.meas_bkg)):
 
-            incident_neutrons = self.intensity(Qth, modelnum=mnum)
+            incident_neutrons = self.instrument.intensity(xs)
 
             # define signal to background. For now, this is just a scaling factor on the effective rate
-            # TODO: Vectorize meas_bkg so there can be one value per measQ value
             sbr = qprof / qbkg
-            refl_rate = incident_neutrons * np.mean(qprof/(1+2/sbr), axis=0)
-            refl_rate = np.maximum(refl_rate, np.zeros_like(refl_rate))
+            refl = np.mean(qprof/(1+2/sbr), axis=0)
+            refl = np.maximum(refl, np.zeros_like(refl))
 
             # q-dependent noise. Use the minimum of the actual spread in Q and the expected spread from the nearest points.
             # TODO: Is this really the right thing to do? Should probably just be the actual spread; the problem is that if
             # the spread doesn't constrain the variables very much, then we just keep measuring at the same point over and over.
             minstd = np.min(np.vstack((np.std(qprof, axis=0), np.interp(Qth, m.fitness.probe.Q, m.fitness.probe.dR))), axis=0)
-            totalrate = refl_rate * (minstd/np.mean(qprof, axis=0))**4
-            #totalrate = refl_rate * (np.std(qprof, axis=0)/np.mean(qprof, axis=0))**4
+            normrefl = refl * (minstd/np.mean(qprof, axis=0))**4
 
             reg = LinearRegression(fit_intercept=True)
             reg.fit(step.draw.points/np.std(step.draw.points, axis=0), qprof/np.std(qprof, axis=0))
@@ -357,11 +382,17 @@ class SimReflExperiment(object):
                 Jj = J_marg[:,j][:,None]
                 df2s_marg[j] = np.squeeze(Jj.T @ covX_marg @ Jj)
 
-            fom = df2s_marg/df2s*totalrate
-            foms.append(fom)
-
-            meas_time = (1-self.eta) / (self.eta**2 * refl_rate * (minstd/np.mean(qprof, axis=0))**2)
-            meas_times.append(meas_time)
+            qfom_norm = df2s_marg/df2s*normrefl
+            fom = list()
+            meas_time = list()
+            for x, intens in zip(xs, incident_neutrons):
+                q = self.instrument.x2q(x)
+                xrefl = intens * np.interp(q, Qth, refl * (minstd/np.mean(qprof, axis=0))**2)
+                # TODO: check this. Should it be the average of xrefl, or the sum?
+                meas_time.append(np.mean((1-self.eta) / (self.eta**2 * xrefl)))
+                fom.append(np.sum(intens * np.interp(q, Qth, qfom_norm)))
+            foms.append(np.array(fom))
+            meas_times.append(np.array(meas_time))
 
         return foms, meas_times
 
@@ -390,26 +421,25 @@ class SimReflExperiment(object):
         top_n = sorted(maxidxs_m, reverse=True)[start:min(start+1, len(maxidxs_m))][0]
 
         if len(top_n):
-
             # generate a DataPoint object with the maximum point
             _, mnum, idx = top_n
             maxfom = step.foms[mnum][idx]       # use unscaled version for plotting
-            newQ = self.measQ[mnum][idx]
+            newx = self.x[mnum][idx]
             new_meastime = max(step.meastimes[mnum][idx], self.min_meas_time)
 
-            newvars = ar.gen_new_variables(newQ)
-            calcR = ar.calc_expected_R(self.calcmodels[mnum].fitness, *newvars, oversampling=self.oversampling)
+            T = self.instrument.T(newx)[0]
+            dT = self.instrument.dT(newx)[0]
+            L = self.instrument.L(newx)[0]
+            dL = self.instrument.dL(newx)[0]
+            #print(T, dT, L, dL)
+            calcR = ar.calc_expected_R(self.calcmodels[mnum].fitness, T, dT, L, dL, oversampling=self.oversampling, resolution='normal')
             #print('expected R:', calcR)
-            incident_neutrons = self.intensity(newQ, modelnum=mnum) * new_meastime
-            N, Nbkg, Ninc = ar.sim_data_N(calcR, incident_neutrons, resid_bkg=self.resid_bkg[mnum], meas_bkg=self.meas_bkg[mnum])
-            #print(newR, target_incident_neutrons, N, Nbkg, Ninc)
-            T = ar.q2a(newQ, self.L)
-            dT = np.polyval(np.array([ 2.30358547e-01, -1.18046955e-05]), newQ)
-            L = np.ones_like(newQ)*self.L
-            dL = np.ones_like(newQ)*self.dL        
+            incident_neutrons = self.instrument.intensity(newx) * new_meastime
+            N, Nbkg, Ninc = ar.sim_data_N(calcR, incident_neutrons.T, resid_bkg=self.resid_bkg[mnum], meas_bkg=self.meas_bkg[mnum])
+            
             t = max(self.min_meas_time, new_meastime)
 
-            return DataPoint(t, mnum, (T, dT, L, dL, N, Nbkg, Ninc), merit=maxfom)
+            return DataPoint(newx, t, mnum, (T, dT, L, dL, N[0], Nbkg[0], Ninc[0]), merit=maxfom)
         
         else:
 
@@ -428,8 +458,8 @@ class SimReflExperiment(object):
 
 class SimReflExperimentControl(SimReflExperiment):
 
-    def __init__(self, problem, Q, model_weights=None, f_intensity=magik_intensity, eta=0.8, npoints=1, switch_penalty=1, bestpars=None, fit_options=fit_options, oversampling=11, meas_bkg=0.000001, startmodel=0, min_meas_time=10, select_pars=None) -> None:
-        super().__init__(problem, Q, f_intensity=f_intensity, eta=eta, npoints=npoints, switch_penalty=switch_penalty, bestpars=bestpars, fit_options=fit_options, oversampling=oversampling, meas_bkg=meas_bkg, startmodel=startmodel, min_meas_time=min_meas_time, select_pars=select_pars)
+    def __init__(self, problem, Q, model_weights=None, instrument=instrument.MAGIK(), eta=0.8, npoints=1, switch_penalty=1, bestpars=None, fit_options=fit_options, oversampling=11, meas_bkg=0.000001, startmodel=0, min_meas_time=10, select_pars=None) -> None:
+        super().__init__(problem, Q, instrument=instrument, eta=eta, npoints=npoints, switch_penalty=switch_penalty, bestpars=bestpars, fit_options=fit_options, oversampling=oversampling, meas_bkg=meas_bkg, startmodel=startmodel, min_meas_time=min_meas_time, select_pars=select_pars)
 
         if model_weights is None:
             model_weights = np.ones(self.nmodels)
@@ -439,28 +469,38 @@ class SimReflExperimentControl(SimReflExperiment):
         model_weights = np.array(model_weights) / np.sum(model_weights)
 
         self.meastimeweights = list()
-        for Q, weight in zip(self.measQ, model_weights):
-            self.meastimeweights.append(weight * np.array(Q)**2 / np.sum(np.array(Q)**2))
+        for x, weight in zip(self.x, model_weights):
+            self.meastimeweights.append(weight * np.array(x)**2 / np.sum(np.array(x)**2))
 
     def take_step(self, total_time):
         points = list()
         #TODO: Make this into a (Q to points) function
-        for mnum, (newQ, mtimeweight, meas_bkg, resid_bkg) in enumerate(zip(self.measQ, self.meastimeweights, self.meas_bkg, self.resid_bkg)):
-            newvars = ar.gen_new_variables(newQ)
-            calcR = ar.calc_expected_R(self.calcmodels[mnum].fitness, *newvars, oversampling=self.oversampling)
+        for mnum, (newx, mtimeweight, meas_bkg, resid_bkg) in enumerate(zip(self.x, self.meastimeweights, self.meas_bkg, self.resid_bkg)):
+
+            Ts = self.instrument.T(newx)
+            dTs = self.instrument.dT(newx)
+            Ls = self.instrument.L(newx)
+            dLs = self.instrument.dL(newx)
+            #print(T, dT, L, dL)
+            incident_neutrons = self.instrument.intensity(newx)
+            for x, t, T, dT, L, dL, intens in zip(newx, total_time * mtimeweight, Ts, dTs, Ls, dLs, incident_neutrons):
+                calcR = ar.calc_expected_R(self.calcmodels[mnum].fitness, T, dT, L, dL, oversampling=self.oversampling, resolution='normal')
             #print('expected R:', calcR)
-            incident_neutrons = self.intensity(newQ, modelnum=mnum) * total_time * mtimeweight
-            Ns, Nbkgs, Nincs = ar.sim_data_N(calcR, incident_neutrons, meas_bkg=meas_bkg, resid_bkg=resid_bkg)
-            #print(newR, target_incident_neutrons, Ns, Nbkgs, Nincs)
-            Ts = ar.q2a(newQ, self.L)
-            # TODO: Replace with resolution function
-            dTs = np.polyval(np.array([ 2.30358547e-01, -1.18046955e-05]), newQ)
-            Ls = np.ones_like(newQ)*self.L
-            dLs = np.ones_like(newQ)*self.dL
-            for t, T, dT, L, dL, N, Nbkg, Ninc in zip(total_time * mtimeweight, Ts, dTs, Ls, dLs, Ns, Nbkgs, Nincs):
-                points.append(DataPoint(t, mnum, (T, dT, L, dL, N, Nbkg, Ninc)))
+                N, Nbkg, Ninc = ar.sim_data_N(calcR, intens.T * t, resid_bkg=resid_bkg, meas_bkg=meas_bkg)
+                points.append(DataPoint(x, t, mnum, (T, dT, L, dL, N, Nbkg, Ninc), movet=self.instrument.movetime(x)[0]))
+                self.instrument.x = x
         
         self.add_step(points)
+
+def magik_intensity(Q, modelnum=None):
+    # gives counts / second as a function of Q for MAGIK
+    # for back compatibility only, now use instrument.py
+    ps1 = np.array([ 1.35295366e+01, -9.99016840e-04])
+    p_intens = np.array([ 5.56637543e+02,  7.27944632e+04,  2.13479802e+02, -4.37052050e+01])
+    news1 = np.polyval(ps1, Q)
+    incident_neutrons = np.polyval(p_intens, news1)
+
+    return incident_neutrons
 
 def _MP_calc_qprofile(problem_point_pair):
     # given a problem and a sample draw and a Q-vector, calculate the profiles associated with each sample
@@ -483,15 +523,19 @@ def _calc_qprofile(calcproblem, point):
     for m, newvar in zip(mlist, newvars):
         calcproblem.setp(point)
         calcproblem.chisq_str()
-        Rth = ar.calc_expected_R(m.fitness, *newvar, oversampling=calcproblem.oversampling)
+        Rth = ar.calc_expected_R(m.fitness, *newvar, oversampling=calcproblem.oversampling, resolution=calcproblem.resolution)
         qprof.append(Rth)
 
     return qprof
 
 
-def load_entropy(steps):
+def load_entropy(steps, control=False):
 
-    allt = np.cumsum([step.meastime() for step in steps])
+    if not control:
+        allt = np.cumsum([step.meastime() + step.movetime() for step in steps])
+    else:
+        # assume all movement was done only once
+        allt = np.cumsum([step.meastime() for step in steps]) + np.array([step.movetime() for step in steps])
     allH = [step.dH for step in steps]
     allH_marg = [step.dH_marg for step in steps]
 
@@ -505,18 +549,20 @@ def snapshot(exp, stepnumber, fig=None, power=4, tscale='log'):
     if fig is None:
         fig = plt.figure(figsize=(8 + 4 * exp.nmodels, 8))
     gsright = GridSpec(2, exp.nmodels + 1, hspace=0, wspace=0.4)
-    gsleft = GridSpec(2, exp.nmodels + 1, hspace=0, wspace=0)
+    gsleft = GridSpec(2, exp.nmodels + 1, hspace=0.2, wspace=0)
     j = stepnumber
     step = exp.steps[j]
 
     steptimes = [sum([step.meastime(modelnum=i) for step in exp.steps[:(j+1)]]) for i in range(exp.nmodels)]
+    movetimes = [sum([step.movetime(modelnum=i) for step in exp.steps[:(j+1)]]) for i in range(exp.nmodels)]
 
     axtopright = fig.add_subplot(gsright[0,-1])
     axbotright = fig.add_subplot(gsright[1,-1], sharex=axtopright)
     axtopright.plot(allt, allH_marg, 'o-')
     axbotright.plot(allt, allH, 'o-')
-    axtopright.plot(allt[j], allH_marg[j], 'o', markersize=15, color='red', alpha=0.4)
-    axbotright.plot(allt[j], allH[j], 'o', markersize=15, color='red', alpha=0.4)
+    if (j + 1) < len(exp.steps):
+        axtopright.plot(allt[j], allH_marg[j], 'o', markersize=15, color='red', alpha=0.4)
+        axbotright.plot(allt[j], allH[j], 'o', markersize=15, color='red', alpha=0.4)
     axbotright.set_xlabel('Time (s)')
     axbotright.set_ylabel(r'$\Delta H_{total}$ (nats)')
     axtopright.set_ylabel(r'$\Delta H_{marg}$ (nats)')
@@ -529,19 +575,20 @@ def snapshot(exp, stepnumber, fig=None, power=4, tscale='log'):
     axbots = [fig.add_subplot(gsleft[1, i]) for i in range(exp.nmodels)]
 
     #print(np.array(step.qprofs).shape, step.draw.logp.shape)
-    foms = step.foms if step.foms is not None else [np.full_like(np.array(measQ), np.nan) for measQ in exp.measQ]
+    foms = step.foms if step.foms is not None else [np.full_like(np.array(x), np.nan) for x in exp.x]
     qprofs = step.qprofs if step.qprofs is not None else [np.full_like(np.array(measQ), np.nan) for measQ in exp.measQ]
-    for i, (measQ, qprof, fom, axtop, axbot) in enumerate(zip(exp.measQ, qprofs, foms, axtops, axbots)):
+    for i, (measQ, qprof, x, fom, axtop, axbot) in enumerate(zip(exp.measQ, qprofs, exp.x, foms, axtops, axbots)):
         plotpoints = [pt for step in exp.steps[:(j+1)] if step.use for pt in step.points if pt.model == i]
         #print(*[[getattr(pt, attr) for pt in plotpoints] for attr in exp.attr_list])
-        idata = [[getattr(pt, attr) for pt in plotpoints] for attr in exp.attr_list]
+        #idata = [[getattr(pt, attr) for pt in plotpoints] for attr in exp.attr_list]
+        idata = [[val for pt in plotpoints for val in getattr(pt, attr)] for attr in exp.attr_list]
         ar.plot_qprofiles(copy.copy(measQ), qprof, step.draw.logp, data=idata, ax=axtop, power=power)
-        axtop.set_title('t = %0.0f s' % steptimes[i], fontsize='larger')
-        axbot.semilogy(measQ, fom, linewidth=3, color='C0')
+        axtop.set_title(f'meas t = {steptimes[i]:0.0f} s\nmove t = {movetimes[i]:0.0f} s', fontsize='larger')
+        axbot.semilogy(x, fom, linewidth=3, color='C0')
         if (j + 1) < len(exp.steps):
             newpoints = [pt for pt in exp.steps[j+1].points if ((pt.model == i) & (pt.merit is not None))]
             for newpt in newpoints:
-                axbot.plot(newpt.Q(), newpt.merit, 'o', alpha=0.5, markersize=12, color='C1')
+                axbot.plot(newpt.x, newpt.merit, 'o', alpha=0.5, markersize=12, color='C1')
         ##axbot.set_xlabel(axtop.get_xlabel())
         ##axbot.set_ylabel('figure of merit')
 
@@ -551,21 +598,23 @@ def snapshot(exp, stepnumber, fig=None, power=4, tscale='log'):
     new_bot_ylims = [min([ylim[0] for ylim in all_bot_ylims]), max([ylim[1] for ylim in all_bot_ylims])]
 
     for axtop, axbot in zip(axtops, axbots):
-        axtop.sharex(axbot)
+        #axtop.sharex(axbot)
         axtop.sharey(axtops[0])
         axbot.sharey(axbots[0])
-        axbot.set_xlabel(r'$Q_z$ (' + u'\u212b' + r'$^{-1}$)')
-        axtop.tick_params(labelleft=False, labelbottom=False, top=True, bottom=True, left=True, right=True, direction='in')
+        axbot.set_xlabel(exp.instrument.xlabel)
+        axtop.set_xlabel(r'$Q_z$ (' + u'\u212b' + r'$^{-1}$)')
+        axtop.tick_params(labelleft=False, labelbottom=True, top=True, bottom=True, left=True, right=True, direction='in')
         axbot.tick_params(labelleft=False, top=True, bottom=True, left=True, right=True, direction='in')
 
     axtops[0].set_ylim(new_top_ylims)
     axbots[0].set_ylim(new_bot_ylims)
-    axtops[0].set_ylabel(r'$R \times Q_z^%i$ (' % power + u'\u212b' + r'$^{-4}$)')
+    rlabel = 'R' if power == 0 else r'$R \times Q_z^%i$ (' % power + u'\u212b' + r'$^{-%i}$)' % power 
+    axtops[0].set_ylabel(rlabel)
     axbots[0].set_ylabel('figure of merit')
     axtops[0].tick_params(labelleft=True)
     axbots[0].tick_params(labelleft=True)
 
-    fig.suptitle('t = %0.0f s' % sum(steptimes), fontsize='larger', fontweight='bold')
+    fig.suptitle(f'measurement time = {sum(steptimes):0.0f} s\nmovement time = {sum(movetimes):0.0f} s', fontsize='larger', fontweight='bold')
 
     return fig, (axtops, axbots, axtopright, axbotright)
 
@@ -581,7 +630,7 @@ def makemovie(exp, outfilename, expctrl=None, fps=1, fmt='gif', power=4, tscale=
         fig, (_, _, axtopright, axbotright) = snapshot(exp, j, fig=fig, power=power, tscale=tscale)
 
         if expctrl is not None:
-            allt, allH, allH_marg = load_entropy(expctrl.steps)
+            allt, allH, allH_marg = load_entropy(expctrl.steps, control=True)
             axtopright.plot(allt, allH_marg, 'o-', color='0.1')
             axbotright.plot(allt, allH, 'o-', color='0.1')
 

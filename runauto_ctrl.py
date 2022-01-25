@@ -6,6 +6,7 @@ import os
 from bumps.cli import load_model
 import matplotlib.pyplot as plt
 from simexp import SimReflExperimentControl, makemovie
+import instrument
 import argparse
 #import imageio
 #import skvideo.io
@@ -24,6 +25,7 @@ parser.add_argument('--maxtime', type=float)
 parser.add_argument('--penalty', type=float)
 parser.add_argument('--burn', type=int)
 parser.add_argument('--steps', type=int)
+parser.add_argument('--instrument', type=str)
 args = parser.parse_args()
 
 # define fit options dictionary
@@ -44,7 +46,14 @@ if __name__ == '__main__':
     fit_options['burn'] = 1000 if args.burn is None else args.burn
     fit_options['steps'] = 500 if args.steps is None else args.steps
 
-    fprefix = 'control'
+    if (args.instrument == 'MAGIK') | (args.instrument is None):
+        instr = instrument.MAGIK()
+    elif args.instrument == 'CANDOR':
+        instr = instrument.CANDOR()
+    else:
+        raise ValueError('instrument must be MAGIK or CANDOR')
+
+    fprefix = instr.name + '_control'
 
     # define file name and create results directory based on timestamp
     fn = copy.copy(datetime.datetime.now().strftime('%Y%m%dT%H%M%S'))
@@ -70,12 +79,12 @@ if __name__ == '__main__':
     meastimes = np.diff(np.insert(np.logspace(1, np.log10(maxtime), 31, endpoint=True), 0, 0))
 
     for kk in range(nrepeats):
-        exp = SimReflExperimentControl(model, measQ, model_weights=[2., 1.], eta=eta, fit_options=fit_options, oversampling=11, bestpars=bestp, select_pars=sel, meas_bkg=[3e-6, 3e-5])
+        exp = SimReflExperimentControl(model, measQ, instrument=instr, model_weights=[2., 1.], eta=eta, fit_options=fit_options, oversampling=11, bestpars=bestp, select_pars=sel, meas_bkg=[3e-6, 3e-5])
         total_t = 0.0
         k = 0
         for meastime in meastimes:
             exp.take_step(meastime)
-            total_t += exp.steps[-1].meastime()
+            total_t += exp.steps[-1].meastime() + exp.steps[-1].movetime()
             print('Rep: %i, Step: %i, Total time so far: %0.1f' % (kk, k, total_t))
             exp.fit_step()
             exp.save(pathname + '/expctrl%i.pickle' % kk)
