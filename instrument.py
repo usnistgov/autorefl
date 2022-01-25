@@ -47,7 +47,7 @@ class ReflectometerBase(object):
     def movetime(self, x):
 
         if self.x is None:
-            return 0
+            return np.array([0])
         else:
             x = np.array(x, ndmin=1)
 
