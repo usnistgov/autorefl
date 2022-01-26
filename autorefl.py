@@ -17,6 +17,7 @@ from reflred.candor import edges, QData
 from reflred.refldata import ReflData, Sample, Detector, Intent, Monochromator
 from reflred.background import subtract_background
 from dataflow.lib.uncertainty import Uncertainty as U
+import dataflow.lib.err1d as err1d
 
 def _rebin_bank(data, bank, q_edges, average):
     """
@@ -126,6 +127,7 @@ def _rebin_bank(data, bank, q_edges, average):
         combined_counts = np.bincount(bin_index, weights=counts, minlength=nbins)
         combined_monitors += empty_q  # Protect against division by zero
         bar_y = combined_counts/combined_monitors
+        #print(y, dy, counts, monitors, bar_y, combined_counts, combined_monitors)
         if norm == "time":
             bar_dy = np.sqrt(bar_y / combined_monitors)
         else:
@@ -312,33 +314,43 @@ def compile_data_N(Qbasis, T, dT, L, dL, Ntot, Nbkg, Ninc):
         #print(T, dT, L, dL, Ntot, Nbkg, Ninc)
         q_edges = edges(Qbasis, extended=True)
 
-        #_Q = TL2Q(T, L)
-        #_dQ = dTdL2dQ(T, dT, L, dL)
-        v = Ntot/Ninc
-        dv = v * np.sqrt(1./np.maximum(Ntot, np.ones_like(Ntot)) + 1./Ninc)
-        vbkg = Nbkg/Ninc
-        dvbkg = vbkg * np.sqrt(1./np.maximum(Nbkg, np.ones_like(Nbkg)) + 1./Ninc)
+        v = Ntot
+        dv = np.sqrt(Ntot)
+        vbkg = Nbkg
+        dvbkg = np.sqrt(Nbkg)
+        vinc = Ninc
+        dvinc = np.sqrt(Ninc)
+        normbase = 'time'
         spec = ReflData(monochromator=Monochromator(wavelength=L[:,None,None], wavelength_resolution=dL[:,None,None]),
                         sample=Sample(angle_x=T[:,None,None]),
                         angular_resolution=dT[:,None,None],
                         detector=Detector(angle_x=2*T[:,None,None], wavelength=L[:,None,None], wavelength_resolution=dL[:,None,None]),
-                        _v=v[:,None,None], _dv=dv[:,None,None], Qz_basis='actual')
+                        _v=v[:,None,None], _dv=dv[:,None,None], Qz_basis='actual', normbase=normbase)
         bkg = ReflData(monochromator=Monochromator(wavelength=L[:,None,None], wavelength_resolution=dL[:,None,None]),
                         sample=Sample(angle_x=T[:,None,None]),
                         angular_resolution=dT[:,None,None],
                         detector=Detector(angle_x=2*T[:,None,None], wavelength=L[:,None,None], wavelength_resolution=dL[:,None,None]),
-                        _v=vbkg[:, None, None], _dv=dvbkg[:,None, None], Qz_basis='actual')
+                        _v=vbkg[:, None, None], _dv=dvbkg[:,None, None], Qz_basis='actual', normbase=normbase)
+        inc = ReflData(monochromator=Monochromator(wavelength=L[:,None,None], wavelength_resolution=dL[:,None,None]),
+                        sample=Sample(angle_x=T[:,None,None]),
+                        angular_resolution=dT[:,None,None],
+                        detector=Detector(angle_x=2*T[:,None,None], wavelength=L[:,None,None], wavelength_resolution=dL[:,None,None]),
+                        _v=vinc[:, None, None], _dv=dvinc[:,None, None], Qz_basis='actual', normbase=normbase)
         spec_rebin = _rebin_bank(spec, 0, q_edges, 'poisson')
         spec2 = QData(spec, *spec_rebin)
         bkg_rebin = _rebin_bank(bkg, 0, q_edges, 'poisson')
         bkg2 = QData(bkg, *bkg_rebin)
         bkg2.intent = Intent.back
+        inc_rebin = _rebin_bank(inc, 0, q_edges, 'poisson')
+        inc2 = QData(inc, *inc_rebin)
 
         vsub, dvsub2 = subtract_background(spec2, bkg2, None)
+        
+        vdiv, dvdiv2 = err1d.div(vsub, (dvsub2 + (dvsub2==0)), inc2.v, inc2.dv**2)
 
         qz, dq, _, _, _Ti, _dT, _L, _dL = spec_rebin
 
-        return _Ti, _dT, _L, _dL, vsub, np.sqrt(dvsub2), qz, dq
+        return _Ti, _dT, _L, _dL, vdiv, np.sqrt(dvdiv2), qz, dq
 
     else:
 
