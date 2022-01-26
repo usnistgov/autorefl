@@ -2,6 +2,7 @@ import numpy as np
 import json
 import warnings
 from autorefl import q2a, a2q
+from reflred.resolution import divergence
 
 class ReflectometerBase(object):
     def __init__(self) -> None:
@@ -17,6 +18,16 @@ class ReflectometerBase(object):
         self.acceleration = 0.5 # units of degrees / second^2 for detector arm
         self.x = None   # current position
 
+        # instrument geometry
+        self._L12 = None
+        self._L2S = None
+        self._LS3 = None
+        self._L34 = None
+        self.footprint = None
+        self.sample_width = None
+        self._S3Offset = 0.0
+        self._R12 = 1.0
+
     def x2q(self, x):
         pass
 
@@ -31,10 +42,11 @@ class ReflectometerBase(object):
 
     def T(self, x):
         
-        return q2a(x, self.L(x))
+        return self.x2a(x)
 
     def dT(self, x):
-        pass
+        usesample = True if self.footprint > self.sample_width else False 
+        return divergence(self.get_slits(x), self.get_slit_distances(), T=self.T(x), sample_width=self.sample_width, use_sample=usesample)
 
     def L(self, x):
         
@@ -43,6 +55,20 @@ class ReflectometerBase(object):
     def dL(self, x):
         
         return np.array(np.ones_like(x) * self._dL, ndmin=1)
+
+    def get_slits(self, x):
+        x = np.array(x, ndmin=1)
+        sintheta = np.sin(np.radians(self.x2a(x)))
+        s2 = self.footprint * sintheta / ((self._R12 + 1) * self._L2S / self._L12 + 1)
+        s1 = self._R12 * s2
+        s3 = (s1 + s2) * (self._L2S + self._LS3) / self._L12 + s2 + self._S3Offset
+        s4 = (s1 + s2) * (self._L2S + self._LS3 + self._L34) / self._L12 + s2 + self._S3Offset
+
+        return s1, s2, s3, s4
+
+    def get_slit_distances(self):
+
+        return -(self._L12 + self._L2S), -self._L2S, self._LS3, self._LS3 + self._L34
 
     def movetime(self, x):
 
@@ -95,8 +121,17 @@ class MAGIK(ReflectometerBase):
         # Acceleration: 0.5 deg / sec^2
         # Top velocity: 1.0 deg / sec
 
+        # instrument geometry
+        self._L12 = 1403.
+        self._L2S = 330.
+        self._LS3 = 229.
+        self._L34 = 939.
+        self.footprint = 45.
+        self._S3Offset = 1.22
+        self._R12 = 1.0
+        self.sample_width = np.inf
+
         # load calibration files
-        # TODO: tie resolution function to instrument geometry or use Reductus data
         try:
             d_intens = np.loadtxt('calibration/magik_intensity_hw106.refl')
 
@@ -128,14 +163,13 @@ class MAGIK(ReflectometerBase):
         return np.array(incident_neutrons, ndmin=2).T
 
     def T(self, x):
-        # TODO: use instrument geometry parameters to calculate this
+
         x = np.array(x, ndmin=1)
         return np.broadcast_to(self.x2a(x), (len(self._L), len(x))).T
 
     def dT(self, x):
-        # TODO: use instrument geometry parameters to calculate this
         x = np.array(x, ndmin=1)
-        dTs = np.polyval(self.pres, x)
+        dTs = super().dT(x).T
         return np.broadcast_to(dTs, (len(self._L), len(x))).T
 
     def L(self, x):
@@ -164,10 +198,16 @@ class CANDOR(ReflectometerBase):
         # Top velocity: 2.0 deg / sec        
         # NOTE: dominated by acceleration and base for most moves!!
 
-        L12 = 4000.
-        L2S = 356.
-        LS3 = 356.
-        L34 = 3000.
+        # instrument geometry
+        self._L12 = 4000.
+        self._L2S = 356.
+        self._LS3 = 356.
+        self._L34 = 3000.
+        self.footprint = 45.
+        self._S3Offset = 5.0
+        self._R12 = 2.5
+        self.detector_mask = 8.0
+        self.sample_width = np.inf
 
         # load wavelength calibration
         wvcal = np.flipud(np.loadtxt(f'calibration/DetectorWavelengths_PG_integrate_sumeff_bank{bank}.csv', delimiter=',', usecols=[1, 2]))
@@ -212,13 +252,18 @@ class CANDOR(ReflectometerBase):
     
         return np.array(incident_neutrons, ndmin=2).T
 
+    def get_slits(self, x):
+        s1, s2, s3, _ = super().get_slits(x)
+
+        return s1, s2, s3, self.detector_mask
+
     def T(self, x):
         x = np.array(x, ndmin=1)
         return np.broadcast_to(x, (len(self._L), len(x))).T
 
     def dT(self, x):
-        x = np.array(x, ndmin=1).T
-        dTs = np.interp(x, self.T_calib, self.angular_resolution_calib)
+        x = np.array(x, ndmin=1)
+        dTs = super().dT(x).T
         return np.broadcast_to(dTs, (len(self._L), len(x))).T
 
     def L(self, x):
