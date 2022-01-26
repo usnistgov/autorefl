@@ -135,17 +135,10 @@ class MAGIK(ReflectometerBase):
         try:
             d_intens = np.loadtxt('calibration/magik_intensity_hw106.refl')
 
-            spec = np.loadtxt('calibration/magik_specular_hw106.dat', usecols=[31, 26, 5], skiprows=9, unpack=False)
-            #qs, s1s, ares = np.delete(spec, 35, 0).T
-            qs, s1s, ares = spec.T
             self.p_intens = np.polyfit(d_intens[:,0], d_intens[:,1], 3, w=1/d_intens[:,2])
-            self.pres = np.polyfit(qs, ares, 1)
-            self.ps1 = np.polyfit(qs, s1s, 1)
         except OSError:
             warnings.warn('MAGIK calibration files not found, using defaults')
             self.p_intens = np.array([ 5.56637543e+02,  7.27944632e+04,  2.13479802e+02, -4.37052050e+01])
-            self.ps1 = np.array([ 1.35295366e+01, -9.99016840e-04])
-            self.pres = np.array([ 2.30358547e-01, -1.18046955e-05])
 
     def x2q(self, x):
         return x
@@ -157,7 +150,7 @@ class MAGIK(ReflectometerBase):
         return min(bounds), max(bounds)
 
     def intensity(self, x):
-        news1 = np.polyval(self.ps1, x)
+        news1 = self.get_slits(x)[0]
         incident_neutrons = np.polyval(self.p_intens, news1)
     
         return np.array(incident_neutrons, ndmin=2).T
@@ -222,17 +215,6 @@ class CANDOR(ReflectometerBase):
         self.s1_intens_calib = np.squeeze(d['outputs'][0]['x'])
         #ps1 = np.polynomial.polynomial.polyfit(s1, intens, 1)
 
-        # load resolution calibration
-        with open('calibration/flowcell_d2o_r12_2_5_maxbeam_60_qoverlap0_751394_unpolarized_specular.json', 'r') as f:
-            spec = json.load(f)
-        
-        #s1idx = spec['outputs'][0]['scan_label'].index('slitAperture1.softPosition')
-        #s1spec = spec['outputs'][0]['scan_value'][s1idx]
-        #Tspec = spec['outputs'][0]['scan_value'][spec['outputs'][0]['scan_label'].index('sampleAngleMotor.softPosition')]
-        self.s1_spec_calib = np.squeeze(spec['outputs'][0]['scan_value'][spec['outputs'][0]['scan_label'].index('slitAperture1.softPosition')])
-        self.angular_resolution_calib = np.squeeze(spec['outputs'][0]['angular_resolution'])
-        self.T_calib = np.squeeze(spec['outputs'][0]['scan_value'][spec['outputs'][0]['scan_label'].index('sampleAngleMotor.softPosition')])
-
     def x2q(self, x):
         return a2q(x, self.L(x))
 
@@ -247,7 +229,7 @@ class CANDOR(ReflectometerBase):
 
     def intensity(self, x):
 
-        news1 = np.interp(x, self.T_calib, self.s1_spec_calib)
+        news1 = self.get_slits(x)[0]
         incident_neutrons = [np.interp(news1, self.s1_intens_calib, intens) for intens in self.intens_calib.T]
     
         return np.array(incident_neutrons, ndmin=2).T
