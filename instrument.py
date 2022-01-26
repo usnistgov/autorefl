@@ -40,7 +40,7 @@ class ReflectometerBase(object):
         
         return np.array(np.ones_like(x) * self._L, ndmin=1)
 
-    def dT(self, x):
+    def dL(self, x):
         
         return np.array(np.ones_like(x) * self._dL, ndmin=1)
 
