@@ -435,7 +435,7 @@ class SimReflExperiment(object):
             calcR = ar.calc_expected_R(self.calcmodels[mnum].fitness, T, dT, L, dL, oversampling=self.oversampling, resolution='normal')
             #print('expected R:', calcR)
             incident_neutrons = self.instrument.intensity(newx) * new_meastime
-            N, Nbkg, Ninc = ar.sim_data_N(calcR, incident_neutrons.T, resid_bkg=self.resid_bkg[mnum], meas_bkg=self.meas_bkg[mnum])
+            N, Nbkg, Ninc = ar.sim_data_N(calcR, incident_neutrons, resid_bkg=self.resid_bkg[mnum], meas_bkg=self.meas_bkg[mnum])
             
             t = max(self.min_meas_time, new_meastime)
 
