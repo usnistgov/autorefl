@@ -309,7 +309,8 @@ def compile_data(Qbasis, T, dT, L, dL, R, dR):
 
 def compile_data_N(Qbasis, T, dT, L, dL, Ntot, Nbkg, Ninc):
     if len(T):
-        T, dT, L, dL, Ntot, Nbkg, Ninc = [np.array(a) for a in (T, dT, L, dL, Ntot, Nbkg, Ninc)]
+        crit = np.round(Ninc)>0 # prevents zero-intensity data points
+        T, dT, L, dL, Ntot, Nbkg, Ninc = [np.array(a)[crit] for a in (T, dT, L, dL, Ntot, Nbkg, Ninc)]
         Ninc = np.round(Ninc)
         #print(T, dT, L, dL, Ntot, Nbkg, Ninc)
         q_edges = edges(Qbasis, extended=True)
