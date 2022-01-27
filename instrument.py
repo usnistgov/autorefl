@@ -256,20 +256,3 @@ class CANDOR(ReflectometerBase):
         x = np.array(x, ndmin=1)
         return np.broadcast_to(self._dL, (len(x), len(self._L)))
     
-
-# TODO: Replace these (currently not used) with Reductus functions for angular resolution using instrument geometry
-def angular_width(s1, s2, L12):
-
-    return (s1 + s2)/L12
-
-def beamwidthatsample(s1, s2, L12, L2S):
-
-    bws = s2 + angular_width(s1, s2, L12)*(L2S)
-
-    return bws
-
-def beamwidthatdetector(s1, s2, L12, L2S, LS3, L34):
-
-    bw4 = s2 + angular_width(s1, s2, L12)*(L2S + LS3 + L34)
-
-    return bw4
