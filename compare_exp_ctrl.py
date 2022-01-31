@@ -32,10 +32,10 @@ def speedup(avexp, avctrl):
 
 #exps = glob.glob('eta0.[2-7,9]*')
 #exps.append('eta0.80_npoints1_repeats1_20220115T194944')
-exps = glob.glob('MAGIK_eta0.50*')
-exps.sort()
+exps = glob.glob('CANDOR_eta0.9[1,5-9]*T??????')
+exps.sort(reverse=True)
 #expctrl = ['control_20220118T180210']
-expctrl = ['MAGIK_control_20220124T215523']
+expctrl = ['CANDOR_control_20220126T223515']
 colors = ['C%i' % i for i in range(10)]
 
 explist = glob.glob(expctrl[0] + '/' + '*.pickle')

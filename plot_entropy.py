@@ -63,9 +63,10 @@ if __name__ == '__main__':
 #    exps = glob.glob('eta0.[2-7,9]*')
 #    exps.append('eta0.80_npoints1_repeats1_20220115T194944')
 #    exps.sort()
-    exps = glob.glob('MAGIK_eta0.8*')
+    exps = glob.glob('CANDOR_eta0.9[1,5-9]*T??????')
+    exps.sort(reverse=True)
 #    expctrls = ['control_20220118T180210']
-    expctrls = ['MAGIK_control_20220125T010413']
+    expctrls = ['CANDOR_control_20220126T223515']
     colors = ['C%i' % i for i in range(10)]
 
     fig, (axm, ax) = plt.subplots(2, 1, sharex=True, gridspec_kw={'hspace': 0}, figsize=(8, 10))
