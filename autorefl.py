@@ -13,6 +13,9 @@ from matplotlib import cm, colors
 from bumps.mapper import MPMapper, can_pickle, SerialMapper
 from sklearn.linear_model import LinearRegression
 from scipy.stats import poisson
+from reflred.candor import edges, _rebin_bank
+from reflred.refldata import ReflData, Sample, Detector, Monochromator
+import dataflow.lib.err1d as err1d
 
 d_intens = np.loadtxt('calibration/magik_intensity_hw106.refl')
 
@@ -149,6 +152,54 @@ def compile_data(Qbasis, T, dT, L, dL, R, dR):
     return _T, _dT, _L, _dL, _R, _dR, _Q, _dQ
 
 def compile_data_N(Qbasis, T, dT, L, dL, Ntot, Nbkg, Ninc):
+    crit = np.round(Ninc)>0 # prevents zero-intensity data points
+    T, dT, L, dL, Ntot, Nbkg, Ninc = [np.array(a)[crit] for a in (T, dT, L, dL, Ntot, Nbkg, Ninc)]
+    if len(T):
+        Ninc = np.round(Ninc)
+        #print(T, dT, L, dL, Ntot, Nbkg, Ninc)
+        q_edges = edges(Qbasis, extended=True)
+
+        v = Ntot
+        dv = np.sqrt(Ntot)
+        vbkg = Nbkg
+        dvbkg = np.sqrt(Nbkg)
+        vinc = Ninc
+        dvinc = np.sqrt(Ninc)
+        normbase = 'time'
+        spec = ReflData(monochromator=Monochromator(wavelength=L[:,None,None], wavelength_resolution=dL[:,None,None]),
+                        sample=Sample(angle_x=T[:,None,None]),
+                        angular_resolution=dT[:,None,None],
+                        detector=Detector(angle_x=2*T[:,None,None], wavelength=L[:,None,None], wavelength_resolution=dL[:,None,None]),
+                        _v=v[:,None,None], _dv=dv[:,None,None], Qz_basis='actual', normbase=normbase)
+        bkg = ReflData(monochromator=Monochromator(wavelength=L[:,None,None], wavelength_resolution=dL[:,None,None]),
+                        sample=Sample(angle_x=T[:,None,None]),
+                        angular_resolution=dT[:,None,None],
+                        detector=Detector(angle_x=2*T[:,None,None], wavelength=L[:,None,None], wavelength_resolution=dL[:,None,None]),
+                        _v=vbkg[:, None, None], _dv=dvbkg[:,None, None], Qz_basis='actual', normbase=normbase)
+        inc = ReflData(monochromator=Monochromator(wavelength=L[:,None,None], wavelength_resolution=dL[:,None,None]),
+                        sample=Sample(angle_x=T[:,None,None]),
+                        angular_resolution=dT[:,None,None],
+                        detector=Detector(angle_x=2*T[:,None,None], wavelength=L[:,None,None], wavelength_resolution=dL[:,None,None]),
+                        _v=vinc[:, None, None], _dv=dvinc[:,None, None], Qz_basis='actual', normbase=normbase)
+
+        # Bin values
+        qz, dq, vspec, dvspec, _Ti, _dT, _L, _dL = _rebin_bank(spec, 0, q_edges, 'poisson')
+        _, _, vbkg, dvbkg, _, _, _, _ = _rebin_bank(bkg, 0, q_edges, 'poisson')
+        _, _, vinc, dvinc, _, _, _, _ = _rebin_bank(inc, 0, q_edges, 'poisson')
+
+        # subtract background
+        vsub, dvsub2 = err1d.sub(vspec, (dvspec**2 + (dvspec==0)), vbkg, (dvbkg**2 + (dvbkg==0)))
+
+        # divide intensity
+        vdiv, dvdiv2 = err1d.div(vsub, (dvsub2 + (dvsub2==0)), vinc, dvinc**2)
+
+        return _Ti, _dT, _L, _dL, vdiv, np.sqrt(dvdiv2), qz, dq
+
+    else:
+
+        return tuple([np.array([]) for _ in range(8)])
+
+def old_compile_data_N(Qbasis, T, dT, L, dL, Ntot, Nbkg, Ninc):
     _Qbasis = np.array(copy.copy(Qbasis))
     _Q = TL2Q(T=T, L=L)
     #print('compile_data_N: ', len(_Q), _Q, _Qbasis)

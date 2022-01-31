@@ -24,6 +24,7 @@ parser.add_argument('--npoints', type=int)
 parser.add_argument('--nrepeats', type=int)
 parser.add_argument('--maxtime', type=float)
 parser.add_argument('--penalty', type=float)
+parser.add_argument('--timepenalty', type=float)
 parser.add_argument('--burn', type=int)
 parser.add_argument('--steps', type=int)
 parser.add_argument('--resume', type=str)
@@ -44,6 +45,7 @@ if __name__ == '__main__':
     maxtime = 21.6e3 if args.maxtime is None else args.maxtime
     nrepeats = 1 if args.nrepeats is None else args.nrepeats
     penalty = 1.0 if args.penalty is None else args.penalty
+    switch_time_penalty = 0.0 if args.timepenalty is None else args.timepenalty
     fit_options['alpha'] = 0.001 if args.alpha is None else args.alpha
     fit_options['burn'] = 1000 if args.burn is None else args.burn
     fit_options['steps'] = 500 if args.steps is None else args.steps
@@ -81,7 +83,7 @@ if __name__ == '__main__':
 
         for kk in range(nrepeats):
             exp = SimReflExperiment(model, measQ, instrument=instr, eta=eta, fit_options=fit_options, oversampling=11, bestpars=bestp, select_pars=sel, meas_bkg=[3e-6, 3e-5], switch_penalty=penalty)
-            exp.switch_time_penalty = 0.0 # takes 5 minutes to switch models
+            exp.switch_time_penalty = switch_time_penalty # takes time to switch models
             exp.add_initial_step()
             total_t = 0.0
             k = 0
