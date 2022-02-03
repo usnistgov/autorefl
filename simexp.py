@@ -21,7 +21,38 @@ import instrument
 fit_options = {'pop': 10, 'burn': 1000, 'steps': 500, 'init': 'lhs', 'alpha': 0.001}
 
 class DataPoint(object):
-    """ Container object for single data point. All inputs should be as lists or ndarrays with min dimension 1"""
+    """ Container object for a single data point.
+
+    A "single data point" normally corresponds to a single instrument configuration.
+    Note that for polychromatic and time-of-flight instruments, this may involve multiple
+    Q values. As a result, all of the "data" fields (described below) are stored 
+    as lists or numpy.ndarrays.
+
+    Required attributes:
+    model -- the index of the bumps.FitProblem model with which the data point
+             is associated
+    t -- the total measurement time 
+    movet -- the total movement time. Note that this varies depending on what the 
+            previous point was.
+    x -- a description of the instrument configuration, usually as a single number
+        whose interpretation is determined by the instrument class (e.g. Q for MAGIK,
+        Theta for CANDOR)
+    merit -- if calculated, the figure of merit of this data point. Mainly used for plotting.
+
+    Data attributes. When initializing, these are required as the argument "data" 
+    in a tuple of lists or arrays.
+    T -- theta array
+    dT -- angular resolution array
+    L -- wavelength array
+    dL -- wavelength uncertainty array
+    N -- neutron counts at this instrument configuration
+    Nbkg -- background neutron counts at this instrument configuration
+    Ninc -- incident neutron counts at this instrument configuration
+
+    Methods:
+    Q -- returns an array of Q points corresponding to T and L.
+    """
+
     def __init__(self, x, meastime, modelnum, data, merit=None, movet=0.0):
         self.model = modelnum
         self.t = meastime
@@ -42,11 +73,13 @@ class DataPoint(object):
 
     @property
     def data(self):
-        """ data is a length-7 tuple with fields T, dT, L, dL, Nspec, Nbkg, Nincident"""
+        """ gets the internal data variable"""
         return self._data
 
     @data.setter
     def data(self, newdata):
+        """populates T, dT, L, dL, N, Nbkg, Ninc.
+            newdata is a length-7 tuple of lists"""
         self._data = newdata
         self.T, self.dT, self.L, self.dL, self.N, self.Nbkg, self.Ninc = newdata
 
@@ -54,7 +87,37 @@ class DataPoint(object):
         return TL2Q(self.T, self.L)
 
 class ExperimentStep(object):
-    """ Container object for experiment step"""
+    """ Container object for a single experiment step.
+
+        Attributes:
+        points -- a list of DataPoint objects
+        H -- MVN entropy in all parameters
+        dH -- change in H from the initial step (with no data and calculated
+                only from the bounds of the model parameters)
+        H_marg -- MVN entropy from selected parameters (marginalized entropy)
+        dH_marg -- change in dH from the initial step
+        foms -- list of the figures of merit for each model
+        scaled_foms -- figures of merit after various penalties are applied. Possibly
+                        not useful
+        meastimes -- list of the measurement time proposed for each Q value of each model
+        qprofs -- list of Q profile arrays calculated from each sample from the MCMC posterior
+        qbkgs -- not used
+        best_logp -- best nllf after fitting
+        final_chisq -- final chi-squared string (including uncertainty) after fitting
+        draw -- an MCMCDraw object containing the best fit results
+        chain_pop -- MCMC chain heads for use in DreamFitPlus for initializing the MCMC
+                     fit. Useful for restarting fits from an arbitrary step.
+        use -- a flag for whether the step contains real data and should be used in furthur
+                analysis.
+        
+        TODO: do not write draw.state, which is inflating file sizes!
+
+        Methods:
+        getdata -- returns all data of type "attr" for data points from a specific model
+        meastime -- returns the total measurement time or the time from a specific model
+        movetime -- returns the total movement time or the time from a specific model
+    """
+
     def __init__(self, points, use=True) -> None:
         self.points = points
         self.H = None
@@ -93,13 +156,26 @@ class ExperimentStep(object):
 
 
 class SimReflExperiment(object):
+    """
+    A simulated reflectometry experiment.
 
+    Contains methods for defining the experiment (via a bumps.FitProblem) object,
+    simulating data from a specific instrument (via a ReflectometerBase-d object from
+    the instrument module), fitting simulated data (via Refl1D), and determining the
+    next optimal measurement point. Also allows saving and loading.
+
+    Typical workflow:
+        exp = SimReflExperiment(...)
+        exp.add_initial_step()
+        while (condition):
+            exp.fit_step()
+            exp.take_step()
+    """
     def __init__(self, problem, Q, instrument=instrument.MAGIK(), eta=0.8, npoints=1, switch_penalty=1, bestpars=None, fit_options=fit_options, oversampling=11, meas_bkg=1e-6, startmodel=0, min_meas_time=10, select_pars=None) -> None:
         # running list of options: oversampling, background x nmodels, minQ, maxQ, fit_options, startmodel, wavelength
         # more options: eta, npoints, (nrepeats not necessary because multiple objects can be made and run), switch_penalty, min_meas_time
         # problem is the FitProblem object to simulate
         # Q is a single Q vector or a list of measurement Q vectors, one for each model in problem
-        # f_intensity is a function that gives the incident intensity as a function of Q. TODO: function of theta for candor and TOF?
         
         self.attr_list = ['T', 'dT', 'L', 'dL', 'N', 'Nbkg', 'Ninc']
 
@@ -113,19 +189,19 @@ class SimReflExperiment(object):
         self.switch_time_penalty = 0.0          # turn into parameter later?
         self.min_meas_time = min_meas_time
 
-        # Initialize
+        # Initialize the fit problem
         self.problem = problem
         models = [problem] if hasattr(problem, 'fitness') else list(problem.models)
         self.models = models
         self.nmodels = len(models)
         self.curmodel = startmodel
         self.oversampling = oversampling
-        self.fit_options = fit_options
         for m in self.models:
             m.fitness.probe.oversample(oversampling)
             m.fitness.probe.resolution = self.instrument.resolution
             m.fitness.update()
 
+        # Condition Q vector to a list of arrays, one for each model
         if isinstance(Q, np.ndarray):
             if len(Q.shape) == 1:
                 self.measQ = np.broadcast_to(Q, (self.nmodels, len(Q)))
@@ -142,11 +218,17 @@ class SimReflExperiment(object):
                 self.measQ = [Q for _ in range(self.nmodels)]
 
         # define measurement space. Contains same number of points per model as self.measQ
+        # measurement space is instrument specific (e.g. for MAGIK x=Q but for polychromatic
+        # or TOF instruments x = Theta). In principle x can be anything that can be mapped
+        # to a specific instrument configuration; this is defined in the instrument module.
+        # TODO: Make separate measurement list. Because Q is used for rebinning, it should
+        # have a different length from "x"
         self.x = list()
         for Q in self.measQ:
             minx, maxx = self.instrument.qrange2xrange([min(Q), max(Q)])
             self.x.append(np.linspace(minx, maxx, len(Q), endpoint=True))
 
+        # Create a copy of the problem for calculating the "true" reflectivity profiles
         self.npars = len(problem.getp())
         self.orgQ = [list(m.fitness.probe.Q) for m in models]
         calcmodel = copy.deepcopy(problem)
@@ -163,35 +245,42 @@ class SimReflExperiment(object):
         # add residual background
         self.resid_bkg = np.array([c.fitness.probe.background.value for c in self.calcmodels])
 
+        # these are not used
         self.newmodels = [m.fitness for m in models]
         self.par_scale = np.diff(problem.bounds(), axis=0)
 
+        # set and condition selected parameters for marginalization; use all parameters
+        # if none are specified
         if select_pars is None:
             self.sel = np.arange(self.npars)
         else:
             self.sel = np.array(select_pars, ndmin=1)
 
+        # calculate initial MVN entropy in the problem
         self.init_entropy = ar.calc_init_entropy(problem)
         self.init_entropy_marg = ar.calc_init_entropy(problem, select_pars=select_pars)
 
+        # initialize objects required for fitting
+        self.fit_options = fit_options
         self.steps = []
         self.restart_pop = None
 
     def start_mapper(self):
-
+        # deprecated: the call to "self" in self.mapper really slows down multiprocessing
         setattr(self.problem, 'calcQs', self.measQ)
         setattr(self.problem, 'oversampling', self.oversampling)
 
         self.mapper = MPMapper.start_mapper(self.problem, None, cpus=0)
 
     def stop_mapper(self):
-
+        # terminates the multiprocessing mapper pool
         MPMapper.pool.terminate()
         
         # allow start_mapper call again
         MPMapper.pool = None
 
     def get_all_points(self, modelnum):
+        # returns all data points associated with model with index modelnum
         return [pt for step in self.steps for pt in step.points if pt.model == modelnum]
 
     def getdata(self, attr, modelnum):
@@ -199,40 +288,62 @@ class SimReflExperiment(object):
         return [getattr(pt, attr) for pt in self.get_all_points(modelnum)]
 
     def compile_datapoints(self, Qbasis, points):
-
+        # bins all of the data from a list "points" onto a Q-space "Qbasis"
         idata = [[val for pt in points for val in getattr(pt, attr)] for attr in self.attr_list]
 
         return ar.compile_data_N(Qbasis, *idata)
 
     def add_initial_step(self, dRoR=10.0):
-
         # generate initial data set. This is only necessary because of the requirement that dof > 0
         # in Refl1D (probably not strictly required for DREAM fit)
+        # dRoR is the target uncertainty relative to the average of the reflectivity and
+        # determines the "measurement time" for the initial data set. This should be larger
+        # than about 3 so as not to constrain the parameters before collecting any real data.
+
+        # evenly spread the Q points over the models in the problem
         nQs = [((self.npars + 1) // self.nmodels) + 1 if i < ((self.npars + 1) % self.nmodels) else ((self.npars + 1) // self.nmodels) for i in range(self.nmodels)]
         newQs = [np.linspace(min(Qvec), max(Qvec), nQ) for nQ, Qvec in zip(nQs, self.measQ)]
 
+        # generate an initial population and calculate the associated q-profiles
         initpts = generate(self.problem, init='lhs', pop=self.fit_options['pop'], use_point=False)
         init_qprof, _ = ar.calc_qprofiles(self.problem, initpts, newQs)
     
         points = []
 
+        # simulate data based on the q profiles. The uncertainty in the parameters is estimated
+        # from the dRoR paramter
         for mnum, (newQ, qprof, meas_bkg, resid_bkg) in enumerate(zip(newQs, init_qprof, self.meas_bkg, self.resid_bkg)):
+            # calculate target mean and uncertainty from unconstrained profiles
             newR, newdR = np.mean(qprof, axis=0), dRoR * np.std(qprof, axis=0)
+
+            # calculate target number of measured neutrons to give the correct uncertainty with
+            # Poisson statistics
             targetN = (newR / newdR) ** 2
+
+            # calculate the target number of incident neutrons to give the target reflectivity
             target_incident_neutrons = targetN / newR
+
+            # simulate the data
             Ns, Nbkgs, Nincs = ar.sim_data_N(newR, target_incident_neutrons, resid_bkg=resid_bkg, meas_bkg=meas_bkg)
-            #print(newR, target_incident_neutrons, Ns, Nbkgs, Nincs)
+
+            # Calculate T, dT, L, dL. Note that because these data don't constrain the model at all,
+            # these values are brought in from MAGIK (not instrument-specific) because they don't need
+            # to be.
             Ts = ar.q2a(newQ, 5.0)
             # Resolution function doesn't matter here at all because these points don't have any effect
             dTs = np.polyval(np.array([ 2.30358547e-01, -1.18046955e-05]), newQ)
             Ls = np.ones_like(newQ)*5.0
             dLs = np.ones_like(newQ)*0.01648374 * 5.0
+
+            # Append the data points with zero measurement time
             points.append(DataPoint(0.0, 0.0, mnum, (Ts, dTs, Ls, dLs, Ns, Nbkgs, Nincs)))
 
+        # Add the step with the new points
         self.add_step(points, use=False)
 
     def update_models(self):
-
+        # Update the models in the fit problem with new data points. Should be run every time
+        # new data are to be incorporated into the model
         for i, (m, measQ) in enumerate(zip(self.models, self.measQ)):
             mT, mdT, mL, mdL, mR, mdR, mQ, mdQ = self.compile_datapoints(measQ, self.get_all_points(i))
             m.fitness.probe._set_TLR(mT, mdT, mL, mdL, mR, mdR, dQ=mdQ)
@@ -240,13 +351,16 @@ class SimReflExperiment(object):
             m.fitness.probe.resolution = self.instrument.resolution
             m.fitness.update()
         
+        # Triggers recalculation of all models
         self.problem.model_reset()
         self.problem.chisq_str()
 
     def calc_qprofiles(self, drawpoints, mappercalc):
+        # q-profile calculator using multiprocessing for speed
         # this version is limited to calculating profiles with measQ, cannot be used with initial calculation
         res = mappercalc(drawpoints)
 
+        # condition output of mappercalc to a list of q-profiles for each model
         qprofs = list()
         for i in range(self.nmodels):
             qprofs.append(np.array([r[i] for r in res]))
@@ -256,27 +370,34 @@ class SimReflExperiment(object):
     def fit_step(self, outfid=None):
         """Analyzes most recent step"""
         
+        # Update models
         self.update_models()
 
+        # Set attributes of "problem" for passing into multiprocessing routines
         setattr(self.problem, 'calcQs', self.measQ)
         setattr(self.problem, 'oversampling', self.oversampling)
         setattr(self.problem, 'resolution', self.instrument.resolution)
 
+        # initialize mappers for Dream fit and for Q profile calculations
         mapper = MPMapper.start_mapper(self.problem, None, cpus=0)
-
         mappercalc = lambda points: MPMapper.pool.map(_MP_calc_qprofile, ((MPMapper.problem_id, p) for p in points))
 
+        # set output stream
         if outfid is not None:
             monitor = StepMonitor(self.problem, outfid)
         else:
             monitor = ConsoleMonitor(self.problem)
+        
+        # Condition and run fit
         fitter = ar.DreamFitPlus(self.problem)
         options=_fill_defaults(self.fit_options, fitter.settings)
         result = fitter.solve(mapper=mapper, monitors=[monitor], initial_population=self.restart_pop, **options)
 
+        # Save head state for initializing the next fit step
         _, chains, _ = fitter.state.chains()
         self.restart_pop = chains[-1, : ,:]
 
+        # Analyze the fit state and save values
         fitter.state.keep_best()
         fitter.state.mark_outliers()
 
@@ -291,24 +412,41 @@ class SimReflExperiment(object):
         step.H_marg = ar.calc_entropy(step.draw.points, select_pars=self.sel)
         step.dH_marg = self.init_entropy_marg - step.H_marg
 
+        # Calculate the Q profiles associated with posterior distribution
         print('Calculating %i Q profiles:' % (step.draw.points.shape[0]))
         init_time = time.time()
         step.qprofs = self.calc_qprofiles(step.draw.points, mappercalc)
         print('Calculation time: %f' % (time.time() - init_time))
 
+        # Terminate the multiprocessing pool (required to avoid memory issues
+        # if run is stopped after current fit step)
         MPMapper.stop_mapper(mapper)
         MPMapper.pool = None
 
     def take_step(self):
-
+        """Analyze the last fitted step and add the next one
+        
+        Procedure:
+            1. Calculate the figures of merit
+            2. Apply penalties to the figures of merit
+            TODO: apply penalties as a separate "cost function"
+            3. Identify and produce the next self.npoints data points
+                to simulate/measure
+            4. Add a new step for fitting.
+        """
+        # Focus on the last step
         step = self.steps[-1]
         
+        # Calculate figures of merit and proposed measurement times
         step.foms, step.meastimes = self.calc_foms(step)
 
+        # Apply the minimum measurement time
+        # TODO: Consider whether the minimum measurement time should be tied to the movement time?
         min_meas_times = [np.maximum(np.full_like(meastime, self.min_meas_time), meastime) for meastime in step.meastimes]
 
         points = []
         
+        # Apply penalties to the figure of merit and find the optimal next point
         for i in range(self.npoints):
             # calculate movement time penalty (and time penalty to switch models if applicable)
             switch_time_penalty = [0.0 if j == self.curmodel else self.switch_time_penalty for j in range(self.nmodels)]
@@ -326,10 +464,16 @@ class SimReflExperiment(object):
                 plt.show()
 
             newpoint = self.select_new_point(step, start=i)
+
+            # newpoint can be None if not enough maxima in the fom are found. In this case
+            # stop looking for new points
             if newpoint is not None:
                 newpoint.movet = self.instrument.movetime(newpoint.x)[0]
                 points.append(newpoint)
                 print('New data point:\t' + repr(newpoint))
+
+                # Once a new point is added, update the current model so model switching
+                # penalties can be reapplied correctly
                 self.curmodel = newpoint.model
 
                 # "move" instrument to new location for calculating the next movement penalty
@@ -340,21 +484,34 @@ class SimReflExperiment(object):
         self.add_step(points)
 
     def add_step(self, points, use=True):
-
+        # Adds a set of DataPoint objects as a new ExperimentStep
         self.steps.append(ExperimentStep(points, use=use))
 
     def calc_foms(self, step):
-    
+        """Calculate figures of merit for each model, using a Jacobian/covariance matrix approach
+
+        Inputs:
+        step -- the step to analyze. Assumes that the step has been fit so
+                step.draw and step.qprofs exist
+
+        Returns:
+        foms -- list of figures of merit (ndarrays), one for each model in self.problem
+        meastimes -- list of suggested measurement times at each Q value, one for each model
+        """
+
         # define parameter numbers to select
         pts = step.draw.points[:,self.sel]
 
         foms = list()
         meas_times = list()
+        # Cycle through models, with model-specific x, Q, calculated q profiles, and measurement background level
         for mnum, (m, xs, Qth, qprof, qbkg) in enumerate(zip(self.models, self.x, self.measQ, step.qprofs, self.meas_bkg)):
 
+            # get the incident intensity for all x values
             incident_neutrons = self.instrument.intensity(xs)
 
             # define signal to background. For now, this is just a scaling factor on the effective rate
+            # reference: Hoogerheide et al. J Appl. Cryst. 2022
             sbr = qprof / qbkg
             refl = np.mean(qprof/(1+2/sbr), axis=0)
             refl = np.maximum(refl, np.zeros_like(refl))
@@ -365,14 +522,23 @@ class SimReflExperiment(object):
             minstd = np.min(np.vstack((np.std(qprof, axis=0), np.interp(Qth, m.fitness.probe.Q, m.fitness.probe.dR))), axis=0)
             normrefl = refl * (minstd/np.mean(qprof, axis=0))**4
 
+            # Calculate the Jacobian matrix from a linear regression of the q-profiles against
+            # the parameters. Do this for all parameters and selected parameters.
+            # TODO: Calculate this once and then select the appropriate parameters
             reg = LinearRegression(fit_intercept=True)
             reg.fit(step.draw.points/np.std(step.draw.points, axis=0), qprof/np.std(qprof, axis=0))
             reg_marg = LinearRegression(fit_intercept=True)
             reg_marg.fit(pts[:,:]/np.std(pts[:,:], axis=0), qprof/np.std(qprof, axis=0))
             J = reg.coef_.T
             J_marg = reg_marg.coef_.T
+
+            # Calculate the covariance matrices for all and selected parameters
+            # TODO: Calculate this once and then select the appropriate parameters
             covX = np.cov((step.draw.points/np.std(step.draw.points, axis=0)).T)
             covX_marg = np.cov((pts/np.std(pts, axis=0)).T)
+
+            # Calculate the fraction of the total uncertainty that can be accounted for
+            # by the selected parameters
             df2s = np.zeros_like(Qth)
             df2s_marg = np.zeros_like(Qth)    
             for j in range(len(Qth)):
@@ -383,6 +549,8 @@ class SimReflExperiment(object):
                 df2s_marg[j] = np.squeeze(Jj.T @ covX_marg @ Jj)
 
             qfom_norm = df2s_marg/df2s*normrefl
+
+            # Calculate figures of merit and proposed measurement times
             fom = list()
             meas_time = list()
             for x, intens in zip(xs, incident_neutrons):
@@ -397,12 +565,23 @@ class SimReflExperiment(object):
         return foms, meas_times
 
     def select_new_point(self, step, start=0):
+        """Find a single new point to measure from the figure of merit
+        
+        Inputs:
+        step -- the step to analyze. Assumes that step has foms (figures of merit) and
+                measurement times precalculated
+        start -- index of figure of merit maxima to begin searching. Allows multiple points
+                to be identified by calling select_new_point sequentially, incrementing "start"
+
+        Returns:
+        a DataPoint object containing the new point with simulated data
+        """
         # finds a single point to measure
         maxQs = []
         maxidxs = []
         maxfoms = []
 
-        # find maximum positions in each model
+        # find maximum figures of merit in each model
 
         for fom, Qth in zip(step.scaled_foms, self.measQ):
             
@@ -415,6 +594,7 @@ class SimReflExperiment(object):
             maxQs.append(Qth[maxidx])
             maxidxs.append(maxidx)
 
+        # condition the maximum indices
         maxidxs_m = [[fom, m, idx] for m, (idxs, mfoms) in enumerate(zip(maxidxs, maxfoms)) for idx, fom in zip(idxs, mfoms)]
         #print(maxidxs_m)
         # select top point
@@ -446,12 +626,17 @@ class SimReflExperiment(object):
             return None
 
     def save(self, fn):
+        """Save a pickled version of the experiment"""
 
         with open(fn, 'wb') as f:
             dill.dump(self, f, recurse=True)
 
     @classmethod
     def load(cls, fn):
+        """ Load a pickled version of the experiment
+        
+        Usage: <variable> = SimReflExperiment.load(<filename>)
+        """
 
         with open(fn, 'rb') as f:
             return dill.load(f)
