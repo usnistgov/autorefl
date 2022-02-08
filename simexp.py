@@ -171,6 +171,7 @@ class SimReflExperiment(object):
             exp.fit_step()
             exp.take_step()
     """
+
     def __init__(self, problem, Q, instrument=instrument.MAGIK(), eta=0.8, npoints=1, switch_penalty=1, bestpars=None, fit_options=fit_options, oversampling=11, meas_bkg=1e-6, startmodel=0, min_meas_time=10, select_pars=None) -> None:
         # running list of options: oversampling, background x nmodels, minQ, maxQ, fit_options, startmodel, wavelength
         # more options: eta, npoints, (nrepeats not necessary because multiple objects can be made and run), switch_penalty, min_meas_time
@@ -434,6 +435,7 @@ class SimReflExperiment(object):
                 to simulate/measure
             4. Add a new step for fitting.
         """
+
         # Focus on the last step
         step = self.steps[-1]
         
@@ -576,6 +578,7 @@ class SimReflExperiment(object):
         Returns:
         a DataPoint object containing the new point with simulated data
         """
+
         # finds a single point to measure
         maxQs = []
         maxidxs = []
@@ -642,6 +645,15 @@ class SimReflExperiment(object):
             return dill.load(f)
 
 class SimReflExperimentControl(SimReflExperiment):
+    r"""Control experiment with even or scaled distribution of count times
+    
+    Subclasses SimReflExperiment.
+
+    New input:
+    model_weights -- a vector of weights, with length equal to number of problems
+                    in self.problem. Scaled by the sum.
+    NOTE: a fixed $Q^2$ weighting is additionally applied to each Q point
+    """
 
     def __init__(self, problem, Q, model_weights=None, instrument=instrument.MAGIK(), eta=0.8, npoints=1, switch_penalty=1, bestpars=None, fit_options=fit_options, oversampling=11, meas_bkg=0.000001, startmodel=0, min_meas_time=10, select_pars=None) -> None:
         super().__init__(problem, Q, instrument=instrument, eta=eta, npoints=npoints, switch_penalty=switch_penalty, bestpars=bestpars, fit_options=fit_options, oversampling=oversampling, meas_bkg=meas_bkg, startmodel=startmodel, min_meas_time=min_meas_time, select_pars=select_pars)
@@ -658,6 +670,12 @@ class SimReflExperimentControl(SimReflExperiment):
             self.meastimeweights.append(weight * np.array(x)**2 / np.sum(np.array(x)**2))
 
     def take_step(self, total_time):
+        r"""Overrides SimReflExperiment.take_step
+        
+        Generates a simulated reflectivity curve based on $Q^2$-scaled
+        measurement times.
+        """
+
         points = list()
         #TODO: Make this into a (Q to points) function
         for mnum, (newx, mtimeweight, meas_bkg, resid_bkg) in enumerate(zip(self.x, self.meastimeweights, self.meas_bkg, self.resid_bkg)):
@@ -678,8 +696,13 @@ class SimReflExperimentControl(SimReflExperiment):
         self.add_step(points)
 
 def magik_intensity(Q, modelnum=None):
-    # gives counts / second as a function of Q for MAGIK
-    # for back compatibility only, now use instrument.py
+    """Give counts/second intensity as a function of Q
+        for MAGIK.
+        
+    Obsolete function for back-compatibility with old code. Superceded by
+    instrument.py
+    """
+
     ps1 = np.array([ 1.35295366e+01, -9.99016840e-04])
     p_intens = np.array([ 5.56637543e+02,  7.27944632e+04,  2.13479802e+02, -4.37052050e+01])
     news1 = np.polyval(ps1, Q)
@@ -688,6 +711,12 @@ def magik_intensity(Q, modelnum=None):
     return incident_neutrons
 
 def _MP_calc_qprofile(problem_point_pair):
+    """ Calculate q profiles based on a sample draw, for use with
+        multiprocessing
+
+        Adapted from refl1d.mapper
+    """
+
     # given a problem and a sample draw and a Q-vector, calculate the profiles associated with each sample
     problem_id, point = problem_point_pair
     if problem_id != MPMapper.problem_id:
@@ -702,6 +731,17 @@ def _MP_calc_qprofile(problem_point_pair):
     return _calc_qprofile(MPMapper.problem, point)
 
 def _calc_qprofile(calcproblem, point):
+    """Calculation function of q profiles using _MP_calc_qprofiles
+    
+    Inputs:
+    calcproblem -- a bumps.BaseFitProblem or bumps.MultiFitProblem, prepopulated
+                    with attributes:
+                        calcQs (same as SimReflExperiment.measQ);
+                        oversampling
+                        resolution (either 'normal' or 'uniform', instrument-dependent)
+    point -- parameter vector
+    """
+    
     mlist = [calcproblem] if hasattr(calcproblem, 'fitness') else list(calcproblem.models)
     newvars = [ar.gen_new_variables(Q) for Q in calcproblem.calcQs]
     qprof = list()
