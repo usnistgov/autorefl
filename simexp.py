@@ -528,18 +528,83 @@ def _calc_qprofile(calcproblem, point):
 
     return qprof
 
-
-def load_entropy(steps, control=False):
+def get_steps_time(steps, control=False):
 
     if not control:
         allt = np.cumsum([step.meastime() + step.movetime() for step in steps])
     else:
         # assume all movement was done only once
         allt = np.cumsum([step.meastime() for step in steps]) + np.array([step.movetime() for step in steps])
+
+    return allt
+
+def load_entropy(steps, control=False):
+
+    allt = get_steps_time(steps, control)
     allH = [step.dH for step in steps]
     allH_marg = [step.dH_marg for step in steps]
 
     return allt, allH, allH_marg
+
+def get_parameter_variance(steps, control=False):
+
+    allt = get_steps_time(steps, control)
+    allvars = [np.var(step.draw.points, axis=1) for step in steps]
+
+    return allt, allvars
+
+def parameter_variance_plot(exp, ctrl=None, fig=None, tscale='log', yscale='log', color=None):
+
+    import matplotlib.ticker
+    locmin = matplotlib.ticker.LogLocator(base=10.0, subs=np.arange(2, 10) * .1,
+                                numticks=100)
+
+    npars = exp.npars
+    labels = exp.problem.labels()
+
+    if fig is None:
+        nmax = int(np.ceil(np.sqrt(npars)))
+        nmin = int(np.ceil(npars/nmax))
+        fig, axvars = plt.subplots(ncols=nmin, nrows=nmax, sharex=True, figsize=(10,8), gridspec_kw={'hspace': 0})
+    else:
+        axvars = fig.get_axes()
+
+    # remove any extra axes
+    for axvar in axvars.flatten()[npars:]:
+        axvar.axis('off')
+
+    # plot things
+    allt, allvars = get_parameter_variance(exp.steps[:-1])
+    for var, ax, label in zip(allvars, axvars.flatten(), labels):
+        ax.plot(allt, np.sqrt(var), 'o')
+        ax.set_ylabel(r'$\sigma$')
+        ax.set_title(label, fontsize='smaller')
+        if tscale == 'log':
+            ax.set_xscale('log')
+            ax.set_xticks(10.**np.arange(0, 6))
+            ax.set_xlim([10, 5e5])
+            ax.tick_params(axis='x', direction='inout', which='both', top=True, bottom=True)
+            ax.tick_params(axis='x', which='major', labelbottom=True, labeltop=False)
+            ax.xaxis.set_minor_locator(locmin)
+        
+        if yscale == 'log':
+            ax.set_yscale('log')
+            ax.set_yticks(10.**np.arange(np.floor(np.log10(ax.get_ylim()[0])), np.ceil(np.log10(ax.get_ylim()[1]))))
+            ax.tick_params(axis='y', direction='inout', which='both', left=True, right=True)
+            ax.tick_params(axis='y', which='major', labelleft=True, labelright=False)
+            ax.yaxis.set_minor_locator(locmin)
+
+    if ctrl is not None:
+        ctrlt, ctrlvars = get_parameter_variance(exp.steps)
+        for var, ax in zip(ctrlvars, axvars.flatten()):
+            ax.plot(ctrlt, np.sqrt(var), 'o-', color='0.1')
+
+    for ax in axvars.T[-1]:
+        ax.set_xlabel(r'$t$ (s)')
+
+    plt.draw()
+
+    return fig, axvars
 
 
 def snapshot(exp, stepnumber, fig=None, power=4, tscale='log'):
