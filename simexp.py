@@ -565,39 +565,48 @@ def parameter_error_plot(exp, ctrl=None, fig=None, tscale='log', yscale='log', c
     nmin = int(np.ceil(npars/nmax))
     if fig is None:
         fig, axvars = plt.subplots(ncols=nmin, nrows=nmax, sharex=True, figsize=(4+2*nmin,4+nmax), gridspec_kw={'hspace': 0})
+        # remove any extra axes, but only for a new figure!
+        for axvar in axvars.flatten()[npars:]:
+            axvar.axis('off')
+        newplot = True
     else:
         axvars = np.array(fig.get_axes())
-
-    # remove any extra axes
-    for axvar in axvars.flatten()[npars:]:
-        axvar.axis('off')
+        axtitles = [ax.get_title() for ax in axvars]
+        axsort = [axtitles.index(label) for label in labels]
+        axvars = axvars[axsort]
+        newplot = False
 
     # plot simulated data
     allt, allvars = get_parameter_variance(exp.steps[:-1])
     for var, ax, label in zip(allvars, axvars.flatten(), labels):
         y = np.sqrt(var)
+        xlims, ylims = ax.get_xlim(), ax.get_ylim()
         ax.plot(allt, y, 'o', alpha=0.4, color=color)
-        #ax.set_ylabel(r'$\sigma$')
-        ax.set_title(label, y=0.5, x=1.05, va='center', ha='left', rotation=-90, fontsize='smaller')
+        if newplot:
+            #ax.set_ylabel(r'$\sigma$')
+            ax.set_title(label, y=0.5, x=1.05, va='center', ha='left', rotation=-90, fontsize='smaller')
 
-        # Format log-scaled axes
-        if tscale == 'log':
-            ax.set_xscale('log')
-            ax.set_xticks(10.**np.arange(np.floor(np.log10(allt[1])), np.ceil(np.log10(allt[-1])) + 1))
-            ax.tick_params(axis='x', direction='inout', which='both', top=True, bottom=True)
-            ax.tick_params(axis='x', which='major', labelbottom=True, labeltop=False)
-            locmin = matplotlib.ticker.LogLocator(base=10.0, subs=np.arange(2, 10) * .1,
-                                numticks=200)
-            ax.xaxis.set_minor_locator(locmin)
-        
-        if yscale == 'log':
-            ax.set_yscale('log')
-            ax.set_yticks(10.**np.arange(np.floor(np.log10(min(y))), np.ceil(np.log10(max(y)))))
-            ax.tick_params(axis='y', direction='inout', which='both', left=True, right=True)
-            ax.tick_params(axis='y', which='major', labelleft=True, labelright=False)
-            locmin = matplotlib.ticker.LogLocator(base=10.0, subs=np.arange(2, 10) * .1,
-                                numticks=200)
-            ax.yaxis.set_minor_locator(locmin)
+            # Format log-scaled axes
+            if tscale == 'log':
+                ax.set_xscale('log')
+                ax.set_xticks(10.**np.arange(np.floor(np.log10(allt[1])), np.ceil(np.log10(allt[-1])) + 1))
+                ax.tick_params(axis='x', direction='inout', which='both', top=True, bottom=True)
+                ax.tick_params(axis='x', which='major', labelbottom=True, labeltop=False)
+                locmin = matplotlib.ticker.LogLocator(base=10.0, subs=np.arange(2, 10) * .1,
+                                    numticks=200)
+                ax.xaxis.set_minor_locator(locmin)
+            
+            if yscale == 'log':
+                ax.set_yscale('log')
+                ax.set_yticks(10.**np.arange(np.floor(np.log10(min(y))), np.ceil(np.log10(max(y)))))
+                ax.tick_params(axis='y', direction='inout', which='both', left=True, right=True)
+                ax.tick_params(axis='y', which='major', labelleft=True, labelright=False)
+                locmin = matplotlib.ticker.LogLocator(base=10.0, subs=np.arange(2, 10) * .1,
+                                    numticks=200)
+                ax.yaxis.set_minor_locator(locmin)
+        else:
+            ax.set_xlim(xlims)
+            ax.set_ylim(ylims)
 
     # plot control if present
     if ctrl is not None:
@@ -605,27 +614,28 @@ def parameter_error_plot(exp, ctrl=None, fig=None, tscale='log', yscale='log', c
         for var, ax in zip(ctrlvars, axvars.flatten()):
             ax.plot(ctrlt, np.sqrt(var), '-', color='0.1')
 
-    # set x axis label only on bottom row
-    for ax in axvars.flatten()[(npars - nmax):npars]:
-        ax.set_xlabel(r'$t$ (s)')
+    if newplot:
+        # set x axis label only on bottom row
+        for ax in axvars.flatten()[(npars - nmax):npars]:
+            ax.set_xlabel(r'$t$ (s)')
 
-    # turn off x axis tick labels for all but the bottom row
-    for ax in axvars.flatten()[:(npars - nmax)]:
-        ax.tick_params(axis='x', labelbottom=False, labeltop=False)
+        # turn off x axis tick labels for all but the bottom row
+        for ax in axvars.flatten()[:(npars - nmax)]:
+            ax.tick_params(axis='x', labelbottom=False, labeltop=False)
 
-    # must call tight_layout before drawing boxes
-    fig.tight_layout()
+        # must call tight_layout before drawing boxes
+        fig.tight_layout()
 
-    # draw boxes around selected parameters
-    if exp.sel is not None:
-        for ax in axvars.flatten()[exp.sel]:
-            # from https://stackoverflow.com/questions/62375119/is-it-possible-to-add-border-or-frame-around-individual-subplots-in-matplotlib
-            bbox = ax.axes.get_window_extent(fig.canvas.get_renderer())
-            x0, y0, width, height = bbox.transformed(fig.transFigure.inverted()).bounds
-            # slightly increase the very tight bounds:
-            xpad = 0.0 * width
-            ypad = 0.0 * height
-            fig.add_artist(plt.Rectangle((x0-xpad, y0-ypad), width+2*xpad, height+2*ypad, edgecolor='red', linewidth=3, fill=False, alpha=0.5))
+        # draw boxes around selected parameters
+        if (exp.sel is not None):
+            for ax in axvars.flatten()[exp.sel]:
+                # from https://stackoverflow.com/questions/62375119/is-it-possible-to-add-border-or-frame-around-individual-subplots-in-matplotlib
+                bbox = ax.axes.get_window_extent(fig.canvas.get_renderer())
+                x0, y0, width, height = bbox.transformed(fig.transFigure.inverted()).bounds
+                # slightly increase the very tight bounds:
+                xpad = 0.0 * width
+                ypad = 0.0 * height
+                fig.add_artist(plt.Rectangle((x0-xpad, y0-ypad), width+2*xpad, height+2*ypad, edgecolor='red', linewidth=3, fill=False, alpha=0.5))
 
     return fig, axvars
 
