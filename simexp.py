@@ -553,7 +553,7 @@ def get_parameter_variance(steps, control=False):
 
     return allt, allvars
 
-def parameter_variance_plot(exp, ctrl=None, fig=None, tscale='log', yscale='log', color=None):
+def parameter_error_plot(exp, ctrl=None, fig=None, tscale='log', yscale='log', color=None):
 
     import matplotlib.ticker
 
@@ -609,14 +609,15 @@ def parameter_variance_plot(exp, ctrl=None, fig=None, tscale='log', yscale='log'
 
     fig.tight_layout()
 
-    for ax in axvars.flatten()[exp.sel]:
-        # from https://stackoverflow.com/questions/62375119/is-it-possible-to-add-border-or-frame-around-individual-subplots-in-matplotlib
-        bbox = ax.axes.get_window_extent(fig.canvas.get_renderer())
-        x0, y0, width, height = bbox.transformed(fig.transFigure.inverted()).bounds
-        # slightly increase the very tight bounds:
-        xpad = 0.0 * width
-        ypad = 0.0 * height
-        fig.add_artist(plt.Rectangle((x0-xpad, y0-ypad), width+2*xpad, height+2*ypad, edgecolor='red', linewidth=3, fill=False, alpha=0.5))
+    if exp.sel is not None:
+        for ax in axvars.flatten()[exp.sel]:
+            # from https://stackoverflow.com/questions/62375119/is-it-possible-to-add-border-or-frame-around-individual-subplots-in-matplotlib
+            bbox = ax.axes.get_window_extent(fig.canvas.get_renderer())
+            x0, y0, width, height = bbox.transformed(fig.transFigure.inverted()).bounds
+            # slightly increase the very tight bounds:
+            xpad = 0.0 * width
+            ypad = 0.0 * height
+            fig.add_artist(plt.Rectangle((x0-xpad, y0-ypad), width+2*xpad, height+2*ypad, edgecolor='red', linewidth=3, fill=False, alpha=0.5))
 
     return fig, axvars
 
