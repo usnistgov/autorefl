@@ -561,12 +561,12 @@ def parameter_error_plot(exp, ctrl=None, fig=None, tscale='log', yscale='log', c
     labels = exp.problem.labels()
 
     # set up figure
+    nmax = int(np.ceil(np.sqrt(npars)))
+    nmin = int(np.ceil(npars/nmax))
     if fig is None:
-        nmax = int(np.ceil(np.sqrt(npars)))
-        nmin = int(np.ceil(npars/nmax))
         fig, axvars = plt.subplots(ncols=nmin, nrows=nmax, sharex=True, figsize=(4+2*nmin,4+nmax), gridspec_kw={'hspace': 0})
     else:
-        axvars = fig.get_axes()
+        axvars = np.array(fig.get_axes())
 
     # remove any extra axes
     for axvar in axvars.flatten()[npars:]:
