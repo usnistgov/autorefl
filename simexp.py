@@ -549,15 +549,13 @@ def load_entropy(steps, control=False):
 def get_parameter_variance(steps, control=False):
 
     allt = get_steps_time(steps, control)
-    allvars = [np.var(step.draw.points, axis=1) for step in steps]
+    allvars = np.array([np.var(step.draw.points, axis=0) for step in steps]).T
 
     return allt, allvars
 
 def parameter_variance_plot(exp, ctrl=None, fig=None, tscale='log', yscale='log', color=None):
 
     import matplotlib.ticker
-    locmin = matplotlib.ticker.LogLocator(base=10.0, subs=np.arange(2, 10) * .1,
-                                numticks=100)
 
     npars = exp.npars
     labels = exp.problem.labels()
@@ -565,7 +563,7 @@ def parameter_variance_plot(exp, ctrl=None, fig=None, tscale='log', yscale='log'
     if fig is None:
         nmax = int(np.ceil(np.sqrt(npars)))
         nmin = int(np.ceil(npars/nmax))
-        fig, axvars = plt.subplots(ncols=nmin, nrows=nmax, sharex=True, figsize=(10,8), gridspec_kw={'hspace': 0})
+        fig, axvars = plt.subplots(ncols=nmin, nrows=nmax, sharex=True, figsize=(4+2*nmin,4+nmax), gridspec_kw={'hspace': 0})
     else:
         axvars = fig.get_axes()
 
@@ -576,33 +574,49 @@ def parameter_variance_plot(exp, ctrl=None, fig=None, tscale='log', yscale='log'
     # plot things
     allt, allvars = get_parameter_variance(exp.steps[:-1])
     for var, ax, label in zip(allvars, axvars.flatten(), labels):
-        ax.plot(allt, np.sqrt(var), 'o')
-        ax.set_ylabel(r'$\sigma$')
-        ax.set_title(label, fontsize='smaller')
+        y = np.sqrt(var)
+        ax.plot(allt, y, 'o', alpha=0.4, color=color)
+        #ax.set_ylabel(r'$\sigma$')
+        ax.set_title(label, y=0.5, x=1.05, va='center', ha='left', rotation=-90, fontsize='smaller')
         if tscale == 'log':
             ax.set_xscale('log')
-            ax.set_xticks(10.**np.arange(0, 6))
-            ax.set_xlim([10, 5e5])
+            ax.set_xticks(10.**np.arange(np.floor(np.log10(allt[1])), np.ceil(np.log10(allt[-1])) + 1))
             ax.tick_params(axis='x', direction='inout', which='both', top=True, bottom=True)
             ax.tick_params(axis='x', which='major', labelbottom=True, labeltop=False)
+            locmin = matplotlib.ticker.LogLocator(base=10.0, subs=np.arange(2, 10) * .1,
+                                numticks=200)
             ax.xaxis.set_minor_locator(locmin)
         
         if yscale == 'log':
             ax.set_yscale('log')
-            ax.set_yticks(10.**np.arange(np.floor(np.log10(ax.get_ylim()[0])), np.ceil(np.log10(ax.get_ylim()[1]))))
+            ax.set_yticks(10.**np.arange(np.floor(np.log10(min(y))), np.ceil(np.log10(max(y)))))
             ax.tick_params(axis='y', direction='inout', which='both', left=True, right=True)
             ax.tick_params(axis='y', which='major', labelleft=True, labelright=False)
+            locmin = matplotlib.ticker.LogLocator(base=10.0, subs=np.arange(2, 10) * .1,
+                                numticks=200)
             ax.yaxis.set_minor_locator(locmin)
 
     if ctrl is not None:
-        ctrlt, ctrlvars = get_parameter_variance(exp.steps)
+        ctrlt, ctrlvars = get_parameter_variance(ctrl.steps)
         for var, ax in zip(ctrlvars, axvars.flatten()):
-            ax.plot(ctrlt, np.sqrt(var), 'o-', color='0.1')
+            ax.plot(ctrlt, np.sqrt(var), '-', color='0.1')
 
-    for ax in axvars.T[-1]:
+    for ax in axvars.flatten()[(npars - nmax):npars]:
         ax.set_xlabel(r'$t$ (s)')
 
-    plt.draw()
+    for ax in axvars.flatten()[:(npars - nmax)]:
+        ax.tick_params(axis='x', labelbottom=False, labeltop=False)
+
+    fig.tight_layout()
+
+    for ax in axvars.flatten()[exp.sel]:
+        # from https://stackoverflow.com/questions/62375119/is-it-possible-to-add-border-or-frame-around-individual-subplots-in-matplotlib
+        bbox = ax.axes.get_window_extent(fig.canvas.get_renderer())
+        x0, y0, width, height = bbox.transformed(fig.transFigure.inverted()).bounds
+        # slightly increase the very tight bounds:
+        xpad = 0.0 * width
+        ypad = 0.0 * height
+        fig.add_artist(plt.Rectangle((x0-xpad, y0-ypad), width+2*xpad, height+2*ypad, edgecolor='red', linewidth=3, fill=False, alpha=0.5))
 
     return fig, axvars
 
