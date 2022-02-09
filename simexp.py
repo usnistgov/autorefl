@@ -560,6 +560,7 @@ def parameter_error_plot(exp, ctrl=None, fig=None, tscale='log', yscale='log', c
     npars = exp.npars
     labels = exp.problem.labels()
 
+    # set up figure
     if fig is None:
         nmax = int(np.ceil(np.sqrt(npars)))
         nmin = int(np.ceil(npars/nmax))
@@ -571,13 +572,15 @@ def parameter_error_plot(exp, ctrl=None, fig=None, tscale='log', yscale='log', c
     for axvar in axvars.flatten()[npars:]:
         axvar.axis('off')
 
-    # plot things
+    # plot simulated data
     allt, allvars = get_parameter_variance(exp.steps[:-1])
     for var, ax, label in zip(allvars, axvars.flatten(), labels):
         y = np.sqrt(var)
         ax.plot(allt, y, 'o', alpha=0.4, color=color)
         #ax.set_ylabel(r'$\sigma$')
         ax.set_title(label, y=0.5, x=1.05, va='center', ha='left', rotation=-90, fontsize='smaller')
+
+        # Format log-scaled axes
         if tscale == 'log':
             ax.set_xscale('log')
             ax.set_xticks(10.**np.arange(np.floor(np.log10(allt[1])), np.ceil(np.log10(allt[-1])) + 1))
@@ -596,19 +599,24 @@ def parameter_error_plot(exp, ctrl=None, fig=None, tscale='log', yscale='log', c
                                 numticks=200)
             ax.yaxis.set_minor_locator(locmin)
 
+    # plot control if present
     if ctrl is not None:
         ctrlt, ctrlvars = get_parameter_variance(ctrl.steps)
         for var, ax in zip(ctrlvars, axvars.flatten()):
             ax.plot(ctrlt, np.sqrt(var), '-', color='0.1')
 
+    # set x axis label only on bottom row
     for ax in axvars.flatten()[(npars - nmax):npars]:
         ax.set_xlabel(r'$t$ (s)')
 
+    # turn off x axis tick labels for all but the bottom row
     for ax in axvars.flatten()[:(npars - nmax)]:
         ax.tick_params(axis='x', labelbottom=False, labeltop=False)
 
+    # must call tight_layout before drawing boxes
     fig.tight_layout()
 
+    # draw boxes around selected parameters
     if exp.sel is not None:
         for ax in axvars.flatten()[exp.sel]:
             # from https://stackoverflow.com/questions/62375119/is-it-possible-to-add-border-or-frame-around-individual-subplots-in-matplotlib
