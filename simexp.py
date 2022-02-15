@@ -489,6 +489,41 @@ class SimReflExperiment(object):
         # Adds a set of DataPoint objects as a new ExperimentStep
         self.steps.append(ExperimentStep(points, use=use))
 
+    def _marginalization_efficiency(self, Qth, qprof, points):
+        """ Calculate the marginalization efficiency: the fraction of uncertainty in R(Q) that
+            arises from the marginal parameters"""
+
+        # define parameter numbers to select
+        marg_points = points[:,self.sel]
+
+        # Calculate the Jacobian matrix from a linear regression of the q-profiles against
+        # the parameters. Do this for all parameters and selected parameters.
+        # TODO: Calculate this once and then select the appropriate parameters
+        reg = LinearRegression(fit_intercept=True)
+        reg.fit(points/np.std(points, axis=0), qprof/np.std(qprof, axis=0))
+        reg_marg = LinearRegression(fit_intercept=True)
+        reg_marg.fit(marg_points[:,:]/np.std(marg_points[:,:], axis=0), qprof/np.std(qprof, axis=0))
+        J = reg.coef_.T
+        J_marg = reg_marg.coef_.T
+
+        # Calculate the covariance matrices for all and selected parameters
+        # TODO: Calculate this once and then select the appropriate parameters
+        covX = np.cov((points/np.std(points, axis=0)).T)
+        covX_marg = np.cov((marg_points/np.std(marg_points, axis=0)).T)
+
+        # Calculate the fraction of the total uncertainty that can be accounted for
+        # by the selected parameters
+        df2s = np.zeros_like(Qth)
+        df2s_marg = np.zeros_like(Qth)    
+        for j in range(len(Qth)):
+            Jj = J[:,j][:,None]
+            df2s[j] = np.squeeze(Jj.T @ covX @ Jj)
+
+            Jj = J_marg[:,j][:,None]
+            df2s_marg[j] = np.squeeze(Jj.T @ covX_marg @ Jj)
+
+        return df2s, df2s_marg, df2s_marg / df2s
+
     def calc_foms(self, step):
         """Calculate figures of merit for each model, using a Jacobian/covariance matrix approach
 
@@ -500,9 +535,6 @@ class SimReflExperiment(object):
         foms -- list of figures of merit (ndarrays), one for each model in self.problem
         meastimes -- list of suggested measurement times at each Q value, one for each model
         """
-
-        # define parameter numbers to select
-        pts = step.draw.points[:,self.sel]
 
         foms = list()
         meas_times = list()
@@ -524,33 +556,10 @@ class SimReflExperiment(object):
             minstd = np.min(np.vstack((np.std(qprof, axis=0), np.interp(Qth, m.fitness.probe.Q, m.fitness.probe.dR))), axis=0)
             normrefl = refl * (minstd/np.mean(qprof, axis=0))**4
 
-            # Calculate the Jacobian matrix from a linear regression of the q-profiles against
-            # the parameters. Do this for all parameters and selected parameters.
-            # TODO: Calculate this once and then select the appropriate parameters
-            reg = LinearRegression(fit_intercept=True)
-            reg.fit(step.draw.points/np.std(step.draw.points, axis=0), qprof/np.std(qprof, axis=0))
-            reg_marg = LinearRegression(fit_intercept=True)
-            reg_marg.fit(pts[:,:]/np.std(pts[:,:], axis=0), qprof/np.std(qprof, axis=0))
-            J = reg.coef_.T
-            J_marg = reg_marg.coef_.T
+            # Calculate marginalization efficiency
+            _, _, marg_eff = self._marginalization_efficiency(Qth, qprof, step.draw.points)
 
-            # Calculate the covariance matrices for all and selected parameters
-            # TODO: Calculate this once and then select the appropriate parameters
-            covX = np.cov((step.draw.points/np.std(step.draw.points, axis=0)).T)
-            covX_marg = np.cov((pts/np.std(pts, axis=0)).T)
-
-            # Calculate the fraction of the total uncertainty that can be accounted for
-            # by the selected parameters
-            df2s = np.zeros_like(Qth)
-            df2s_marg = np.zeros_like(Qth)    
-            for j in range(len(Qth)):
-                Jj = J[:,j][:,None]
-                df2s[j] = np.squeeze(Jj.T @ covX @ Jj)
-
-                Jj = J_marg[:,j][:,None]
-                df2s_marg[j] = np.squeeze(Jj.T @ covX_marg @ Jj)
-
-            qfom_norm = df2s_marg/df2s*normrefl
+            qfom_norm = marg_eff*normrefl
 
             # Calculate figures of merit and proposed measurement times
             fom = list()
