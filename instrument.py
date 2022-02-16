@@ -109,7 +109,7 @@ class MAGIK(ReflectometerBase):
     def __init__(self) -> None:
         super().__init__()
         self._L = np.array([5.0])
-        self._dL = 0.01648374 * self._L
+        self._dL = 0.01648374 * self._L / 2.355
         self.xlabel = r'$Q_z$ (' + u'\u212b' + r'$^{-1}$)'
         self.name = 'MAGIK'
         self.resolution = 'normal'

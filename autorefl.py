@@ -52,7 +52,7 @@ def sim_data(R, incident_neutrons, addnoise=True, background=0):
 def sim_data_N(R, incident_neutrons, addnoise=True, resid_bkg=0, meas_bkg=0):
     R = np.array(R, ndmin=1)
     _bR = np.ones_like(R)*(meas_bkg - resid_bkg)*incident_neutrons
-    _R = (R + meas_bkg)*incident_neutrons
+    _R = (R + meas_bkg - resid_bkg)*incident_neutrons
     N = poisson.rvs(_R, size=_R.shape)
     bN = poisson.rvs(_bR, size=_bR.shape)
 
@@ -166,20 +166,21 @@ def compile_data_N(Qbasis, T, dT, L, dL, Ntot, Nbkg, Ninc):
         vinc = Ninc
         dvinc = np.sqrt(Ninc)
         normbase = 'time'
-        spec = ReflData(monochromator=Monochromator(wavelength=L[:,None,None], wavelength_resolution=dL[:,None,None]),
+        wavelength_resolution = dL[:,None,None]  / L[:,None,None]
+        spec = ReflData(monochromator=Monochromator(wavelength=L[:,None,None], wavelength_resolution=wavelength_resolution),
                         sample=Sample(angle_x=T[:,None,None]),
                         angular_resolution=dT[:,None,None],
-                        detector=Detector(angle_x=2*T[:,None,None], wavelength=L[:,None,None], wavelength_resolution=dL[:,None,None]),
+                        detector=Detector(angle_x=2*T[:,None,None], wavelength=L[:,None,None], wavelength_resolution=wavelength_resolution),
                         _v=v[:,None,None], _dv=dv[:,None,None], Qz_basis='actual', normbase=normbase)
-        bkg = ReflData(monochromator=Monochromator(wavelength=L[:,None,None], wavelength_resolution=dL[:,None,None]),
+        bkg = ReflData(monochromator=Monochromator(wavelength=L[:,None,None], wavelength_resolution=wavelength_resolution),
                         sample=Sample(angle_x=T[:,None,None]),
                         angular_resolution=dT[:,None,None],
-                        detector=Detector(angle_x=2*T[:,None,None], wavelength=L[:,None,None], wavelength_resolution=dL[:,None,None]),
+                        detector=Detector(angle_x=2*T[:,None,None], wavelength=L[:,None,None], wavelength_resolution=wavelength_resolution),
                         _v=vbkg[:, None, None], _dv=dvbkg[:,None, None], Qz_basis='actual', normbase=normbase)
-        inc = ReflData(monochromator=Monochromator(wavelength=L[:,None,None], wavelength_resolution=dL[:,None,None]),
+        inc = ReflData(monochromator=Monochromator(wavelength=L[:,None,None], wavelength_resolution=wavelength_resolution),
                         sample=Sample(angle_x=T[:,None,None]),
                         angular_resolution=dT[:,None,None],
-                        detector=Detector(angle_x=2*T[:,None,None], wavelength=L[:,None,None], wavelength_resolution=dL[:,None,None]),
+                        detector=Detector(angle_x=2*T[:,None,None], wavelength=L[:,None,None], wavelength_resolution=wavelength_resolution),
                         _v=vinc[:, None, None], _dv=dvinc[:,None, None], Qz_basis='actual', normbase=normbase)
 
         # Bin values
