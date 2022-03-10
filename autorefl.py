@@ -287,6 +287,10 @@ def calc_entropy(pts, select_pars=None):
     npar = len(sel)
 
     covX = np.cov(pts.T)
+
+    # protects against single selected parameters that give zero-dimension covX
+    covX = np.array(covX, ndmin=2)
+
     H = 0.5 * npar * (np.log(2 * np.pi) + 1) + np.linalg.slogdet(covX)[1]
     return H
 

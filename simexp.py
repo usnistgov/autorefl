@@ -509,7 +509,9 @@ class SimReflExperiment(object):
         # Calculate the covariance matrices for all and selected parameters
         # TODO: Calculate this once and then select the appropriate parameters
         covX = np.cov((points/np.std(points, axis=0)).T)
+        covX = np.array(covX, ndmin=2)
         covX_marg = np.cov((marg_points/np.std(marg_points, axis=0)).T)
+        covX_marg = np.array(covX_marg, ndmin=2)
 
         # Calculate the fraction of the total uncertainty that can be accounted for
         # by the selected parameters
