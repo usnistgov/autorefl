@@ -640,6 +640,9 @@ class SimReflExperiment(object):
     def save(self, fn):
         """Save a pickled version of the experiment"""
 
+        for step in self.steps[:-2]:
+            step.draw.state = None
+
         with open(fn, 'wb') as f:
             dill.dump(self, f, recurse=True)
 
