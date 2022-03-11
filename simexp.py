@@ -404,7 +404,7 @@ class SimReflExperiment(object):
 
         step = self.steps[-1]
         step.chain_pop = chains[-1, :, :]
-        step.draw = fitter.state.draw(thin=self.fit_options['steps']*2)
+        step.draw = fitter.state.draw(thin=int(self.fit_options['steps']*0.2))
         step.best_logp = fitter.state.best()[1]
         self.problem.setp(fitter.state.best()[0])
         step.final_chisq = self.problem.chisq_str()
@@ -552,10 +552,17 @@ class SimReflExperiment(object):
             refl = np.mean(qprof/(1+2/sbr), axis=0)
             refl = np.maximum(refl, np.zeros_like(refl))
 
-            # q-dependent noise. Use the minimum of the actual spread in Q and the expected spread from the nearest points.
+            # q-dependent noise. Use the minimum of the actual spread in Q and the expected spread from the nearest points. 
+            # This can get stuck if the spread changes too rapidly, so dR is smoothed by dQ.
+            smoothed_dR = list()
+            Q, dR = m.fitness.probe.Q, m.fitness.probe.dR
+            for Qi, dQi in zip(Q, m.fitness.probe.dQ):
+                kernel = 1./(2*np.pi*dQi**2) * np.exp(-(Q - Qi) ** 2 / (2 * dQi **2))
+                smoothed_dR.append(np.sum(dR * kernel / dR ** 2) / np.sum(kernel / dR ** 2))
+
             # TODO: Is this really the right thing to do? Should probably just be the actual spread; the problem is that if
             # the spread doesn't constrain the variables very much, then we just keep measuring at the same point over and over.
-            minstd = np.min(np.vstack((np.std(qprof, axis=0), np.interp(Qth, m.fitness.probe.Q, m.fitness.probe.dR))), axis=0)
+            minstd = np.min(np.vstack((np.std(qprof, axis=0), np.interp(Qth, m.fitness.probe.Q, smoothed_dR))), axis=0)
             normrefl = refl * (minstd/np.mean(qprof, axis=0))**4
 
             # Calculate marginalization efficiency
