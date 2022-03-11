@@ -577,6 +577,9 @@ class SimReflExperiment(object):
                 q = self.instrument.x2q(x)
                 xrefl = intens * np.interp(q, Qth, refl * (minstd/np.mean(qprof, axis=0))**2)
                 # TODO: check this. Should it be the average of xrefl, or the sum?
+                # TODO: Make eta dependent on the figure of merit relative to its average, i.e. eta = np.mean(fom) / fom.
+                #       In this case each measured point is measured until its value equals that of the average.
+                #       Check that this doesn't reduce efficiency tremendously.
                 meas_time.append(np.mean((1-self.eta) / (self.eta**2 * xrefl)))
                 fom.append(np.sum(intens * np.interp(q, Qth, qfom_norm)))
             foms.append(np.array(fom))
@@ -596,6 +599,11 @@ class SimReflExperiment(object):
         Returns:
         a DataPoint object containing the new point with simulated data
         """
+
+        # TODO: Implement a more random algorithm. One idea is to define a partition function
+        #       Z = np.exp(fom / np.mean(fom)) - 1. The fom is then related to ln(Z(x)). Points are chosen
+        #       using np.random.choice(x, size=self.npoints, p=Z/np.sum(Z)).
+        #       I think that penalties will have to be applied differently, potentially directly to Z.
 
         # finds a single point to measure
         maxQs = []
