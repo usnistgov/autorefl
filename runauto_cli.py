@@ -36,6 +36,7 @@ parser.add_argument('--timepenalty', type=float, default=0.0)
 parser.add_argument('--burn', type=int, default=1000)
 parser.add_argument('--steps', type=int, default=500)
 parser.add_argument('--pop', type=int, default=8)
+parser.add_argument('--init', type=str, default='lhs')
 parser.add_argument('--resume', type=str)
 parser.add_argument('--instrument', type=str, default='MAGIK')
 parser.add_argument('--oversampling', type=int, default=11)
@@ -76,7 +77,10 @@ if __name__ == '__main__':
         bestp = np.array([float(line.split(' ')[-1]) for line in open(bestpars, 'r').readlines()]) if bestpars is not None else None
 
         # measurement background
-        meas_bkg = np.full(len(model.models), 1e-5) if args.meas_bkg is not None else args.meas_bkg
+        meas_bkg = args.meas_bkg if args.meas_bkg is not None else np.full(len(list(model.models)), 1e-5)
+
+        # condition selection array
+        sel = np.array(args.sel) if args.sel is not None else None
 
         # simulated experiment
         if not args.control:
@@ -86,8 +90,8 @@ if __name__ == '__main__':
             measQ = np.linspace(0.008, 0.25, 201)
 
             for kk in range(args.nrepeats):
-                exp = SimReflExperiment(model, measQ, instrument=args.instr, eta=args.eta, fit_options=fit_options, oversampling=args.oversampling, bestpars=bestp, select_pars=args.sel, meas_bkg=meas_bkg, switch_penalty=args.penalty, npoints=args.npoints)
-                exp.switch_time_penalty = args.switch_time_penalty # takes time to switch models
+                exp = SimReflExperiment(model, measQ, instrument=instr, eta=args.eta, fit_options=fit_options, oversampling=args.oversampling, bestpars=bestp, select_pars=sel, meas_bkg=meas_bkg, switch_penalty=args.penalty, npoints=args.npoints)
+                exp.switch_time_penalty = args.timepenalty # takes time to switch models
                 exp.add_initial_step()
                 total_t = 0.0
                 k = 0
@@ -117,13 +121,13 @@ if __name__ == '__main__':
 
             # condition model weights
             if args.model_weights is None:
-                model_weights = np.ones(len(model.models))
+                model_weights = np.ones(len(list(model.models)))
             else:
                 assert len(args.model_weights) == len(model.models), 'model_weights must have one per model'
                 model_weights = args.model_weights
 
             for kk in range(args.nrepeats):
-                exp = SimReflExperimentControl(model, measQ, instrument=instr, model_weights=model_weights, eta=args.eta, fit_options=fit_options, oversampling=args.oversampling, bestpars=bestp, select_pars=args.sel, meas_bkg=meas_bkg)
+                exp = SimReflExperimentControl(model, measQ, instrument=instr, model_weights=model_weights, eta=args.eta, fit_options=fit_options, oversampling=args.oversampling, bestpars=bestp, select_pars=sel, meas_bkg=meas_bkg)
                 total_t = 0.0
                 k = 0
                 for meastime in meastimes:
