@@ -573,17 +573,45 @@ class SimReflExperiment(object):
             # Calculate figures of merit and proposed measurement times
             fom = list()
             meas_time = list()
+            old_meas_time = list()
             for x, intens in zip(xs, incident_neutrons):
                 q = self.instrument.x2q(x)
-                xrefl = intens * np.interp(q, Qth, refl * (minstd/np.mean(qprof, axis=0))**2)
+                #xrefl = intens * np.interp(q, Qth, refl * (minstd/np.mean(qprof, axis=0))**2)
                 # TODO: check this. Should it be the average of xrefl, or the sum?
-                # TODO: Make eta dependent on the figure of merit relative to its average, i.e. eta = np.mean(fom) / fom.
-                #       In this case each measured point is measured until its value equals that of the average.
-                #       Check that this doesn't reduce efficiency tremendously.
-                meas_time.append(np.mean((1-self.eta) / (self.eta**2 * xrefl)))
+                #old_meas_time.append(np.mean((1-self.eta) / (self.eta**2 * xrefl)))
+
+                # calculate the figure of merit
                 fom.append(np.sum(intens * np.interp(q, Qth, qfom_norm)))
-            foms.append(np.array(fom))
+
+            fom = np.array(fom)
+
+            # calculate the effective number of detectors. If only a few are lighting up, this will be close to 1,
+            # otherwise, if all the intensities are about the same, this will be close to the number of detectors
+            # TODO: Calculate this correctly. For CANDOR in monochromatic mode, this might break because the effective
+            # number of detectors is not 54, but 2 or 3. So just blindly taking all detectors is probably not correct.
+            # An appropriately weighted sum would probably be better.
+            effective_detectors = float(incident_neutrons.shape[1])
+            #print(f'effective detectors: {effective_detectors}')
+
+            for x, intens, ifom in zip(xs, incident_neutrons, fom):
+                q = self.instrument.x2q(x)
+                xrefl = intens * np.interp(q, Qth, refl * (minstd/np.mean(qprof, axis=0))**2)
+
+                # original calculation
+                old_meas_time.append(np.mean((1-self.eta) / (self.eta**2 * xrefl)))
+
+                # automatic eta determination
+                # sqrt is because the fom is proportional to (sigma ** 2) ** 2.
+                # Use self.eta as an upper limit to avoid negative 1 - eta
+                # Division by effective number of detectors accounts for simultaneous detection in
+                # multiple detectors
+                eta = min((np.mean(fom) / ifom) ** 0.5, self.eta)
+                eta = 1 - (1 - eta) / effective_detectors
+                meas_time.append(np.mean((1 - eta) / (eta ** 2 * xrefl)))
+
+            foms.append(fom)
             meas_times.append(np.array(meas_time))
+            #print(np.vstack((xs, old_meas_time, meas_time)).T)
 
         return foms, meas_times
 
