@@ -23,6 +23,7 @@ def combinedata(explist, controls=False):
 
     for expname in explist:
         exp = ctype.load(expname)
+        print(exp.problem.chisq_str())
         allt, allH, allH_marg = load_entropy(exp.steps[:-1]) if not controls else load_entropy(exp.steps, control=True)
         allts.append(allt)
         allHs.append(allH)
@@ -63,10 +64,10 @@ if __name__ == '__main__':
 #    exps = glob.glob('eta0.[2-7,9]*')
 #    exps.append('eta0.80_npoints1_repeats1_20220115T194944')
 #    exps.sort()
-    exps = glob.glob('CANDOR_eta0.9[1,5-9]*T??????')
+    exps = glob.glob('20220127_candor_eta_movement/CANDOR_eta0.9[1,5-9]*T??????')
     exps.sort(reverse=True)
 #    expctrls = ['control_20220118T180210']
-    expctrls = ['CANDOR_control_20220126T223515']
+    expctrls = ['20220127_candor_eta_movement/CANDOR_control_20220126T223515']
     colors = ['C%i' % i for i in range(10)]
 
     fig, (axm, ax) = plt.subplots(2, 1, sharex=True, gridspec_kw={'hspace': 0}, figsize=(8, 10))
