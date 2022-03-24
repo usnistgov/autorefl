@@ -87,7 +87,7 @@ if __name__ == '__main__':
 
             # calculation vector
             # TODO: figure out how to specify this in the cli
-            measQ = np.linspace(0.008, 0.25, 201)
+            measQ = np.linspace(0.008, 0.5, 401)
 
             for kk in range(args.nrepeats):
                 exp = SimReflExperiment(model, measQ, instrument=instr, eta=args.eta, fit_options=fit_options, oversampling=args.oversampling, bestpars=bestp, select_pars=sel, meas_bkg=meas_bkg, switch_penalty=args.penalty, npoints=args.npoints)
