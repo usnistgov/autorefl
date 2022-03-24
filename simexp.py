@@ -174,7 +174,7 @@ class SimReflExperiment(object):
             exp.take_step()
     """
 
-    def __init__(self, problem, Q, instrument=instrument.MAGIK(), eta=0.8, npoints=1, switch_penalty=1, bestpars=None, fit_options=fit_options, oversampling=11, meas_bkg=1e-6, startmodel=0, min_meas_time=10, select_pars=None) -> None:
+    def __init__(self, problem, Q, instrument=instrument.MAGIK(), eta=0.68, npoints=1, switch_penalty=1, bestpars=None, fit_options=fit_options, oversampling=11, meas_bkg=1e-6, startmodel=0, min_meas_time=10, select_pars=None) -> None:
         # running list of options: oversampling, background x nmodels, minQ, maxQ, fit_options, startmodel, wavelength
         # more options: eta, npoints, (nrepeats not necessary because multiple objects can be made and run), switch_penalty, min_meas_time
         # problem is the FitProblem object to simulate
@@ -617,7 +617,7 @@ class SimReflExperiment(object):
 
         return foms, meas_times
 
-    def _dHdt(self, pts, qprofs, incident_neutrons, n_steps=1):
+    def _dHdt(self, pts, qprofs, incident_neutrons, n_steps=1, resample=0):
         """ Calculate rate of change of entropy (dH/dt) for measuring at a given Q point
         
         Inputs:
@@ -625,13 +625,16 @@ class SimReflExperiment(object):
         pts -- the parameter samples underlying each Q profile (nprof x npar array)
         qprofs -- Q profiles (nprof x nQ array)
         incident_neutrons -- intensity ()
+        resample -- attempt to find best point by resampling Q profiles and averaging entropy decrease.
+                    defaults to 0 (resampling off); use a nonzero integer for number of resamples (should
+                    be at least 10 but becomes computationally expensive as it grows)
         n_steps -- (ignored for now) optional parameter defaults to 1: number of forward steps to look
         
         Returns:
         ????
         """
 
-        eta = 0.68  # measure to 1 standard deviation
+        eta = self.eta  # measure to specified level
         #for _ in range(n_steps):
         dH = list()
         dHdt = list()
@@ -664,20 +667,26 @@ class SimReflExperiment(object):
             # calculate probability density of new distribution
             p = (2 * np.pi * eff_sigma ** 2) * np.exp(-(iqs_sorted - med) ** 2 / (2 * eff_sigma) ** 2)
 
-            iHs = list()
-            for _ in range(20):
-                # resample original curves
-                r1idxs = rng.choice(np.arange(len(iqs_sorted)), size=len(iqs_sorted), p=p/np.sum(p))
-                r1idxs = np.unique(r1idxs)
-                
-                # select corresponding parameter values
-                newpts = pts[r1idxs]
+            if resample == 0:
+                # if not resampling, just take all curves in the specified confidence interval
+                crit = (iqs > ci[0]) & (iqs < ci[1])
+                r1idxs = np.arange(len(crit))[crit]
+                iH = ar.calc_entropy(pts[crit, :], select_pars=self.sel)
+            else:
+                iHs = list()
+                for _ in range(int(resample)):
+                    # resample original curves
+                    r1idxs = rng.choice(np.arange(len(iqs_sorted)), size=len(iqs_sorted), p=p/np.sum(p))
+                    r1idxs = np.unique(r1idxs)
+                    
+                    # select corresponding parameter values
+                    newpts = pts[r1idxs]
 
-                # calculate marginalized entropy of selected points
-                iH = ar.calc_entropy(newpts, select_pars=self.sel)
+                    # calculate marginalized entropy of selected points
+                    iH = ar.calc_entropy(newpts, select_pars=self.sel)
 
-                iHs.append(iH)
-            iH = np.mean(iHs)
+                    iHs.append(iH)
+                iH = np.mean(iHs)
 
             # calculate differential entropy from initial state
             dH.append(H0 - iH)
