@@ -638,38 +638,52 @@ class SimReflExperiment(object):
         ts = list()
         goodidxs = list()
         H0 = ar.calc_entropy(pts, select_pars=self.sel)
+
+        # initialize random number generator
+        rng = np.random.default_rng()
+
         # cycle through all q values)
         for idx, intens in enumerate(incident_neutrons):
             
             # extract distribution of q profiles
             iqs = qprofs[:,idx]
+            iqs_sorted = np.sort(iqs)
             
             # calculate median and (eta x 100) CI
-            med, ci = credible_interval(iqs, (0, eta))
+            med, ci = credible_interval(iqs_sorted, (0, eta))
+            med = med[0]
+            eff_sigma = 0.5 * np.diff(ci)[0]
 
             # estimate neutron flux (intens x med) and existing uncertainty
-            xrefl = (intens * med * (np.diff(ci) / med) ** 2)[0]
+            xrefl = (intens * med * (eff_sigma / med) ** 2)
 
             # estimate measurement time to equal standard deviation of a gaussian with this CI
-            meastime = (1-eta) / (eta**2 * xrefl)
+            #meastime = (1-eta) / (eta**2 * xrefl)
+            meastime = 1.0 / xrefl
 
-            # select only curves within the confidence interval
-            # TODO: Use change in llf to resample curves, weighting by llf?
-            crit = ((iqs > ci[0]) & (iqs < ci[1]))
+            # calculate probability density of new distribution
+            p = (2 * np.pi * eff_sigma ** 2) * np.exp(-(iqs_sorted - med) ** 2 / (2 * eff_sigma) ** 2)
 
-            # find indices of selected curves
-            goodidxs.append(np.arange(len(crit))[crit])
+            iHs = list()
+            for _ in range(20):
+                # resample original curves
+                r1idxs = rng.choice(np.arange(len(iqs_sorted)), size=len(iqs_sorted), p=p/np.sum(p))
+                r1idxs = np.unique(r1idxs)
+                
+                # select corresponding parameter values
+                newpts = pts[r1idxs]
 
-            # select corresponding parameter values
-            newpts = pts[crit]
+                # calculate marginalized entropy of selected points
+                iH = ar.calc_entropy(newpts, select_pars=self.sel)
 
-            # calculate marginalized entropy of selected points
-            iH = ar.calc_entropy(newpts, select_pars=self.sel)
+                iHs.append(iH)
+            iH = np.mean(iHs)
 
             # calculate differential entropy from initial state
             dH.append(H0 - iH)
             dHdt.append((H0 - iH) / meastime)
             ts.append(meastime)
+            goodidxs.append(r1idxs)
         
         # selection (vestigial if n_steps == 1, used if doing multiple forecasting)
         maxidx = np.where(dHdt==np.max(dHdt))[0][0]
