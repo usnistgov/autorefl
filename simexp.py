@@ -735,14 +735,16 @@ class SimReflExperiment(object):
             fom = list()
             meas_time = list()
             for x, intens in zip(xs, incident_neutrons):
-                q = self.instrument.x2q(x)
+                q = np.squeeze(self.instrument.x2q(x))
                 #xrefl = intens * np.interp(q, Qth, refl * (minstd/np.mean(qprof, axis=0))**2)
                 # TODO: check this. Should it be the average of xrefl, or the sum?
                 #old_meas_time.append(np.mean((1-self.eta) / (self.eta**2 * xrefl)))
-
+                
                 # calculate the figure of merit
-                xqprof = np.array(interp_refl(q), ndmin=2).T
-
+                xqprof = np.array(interp_refl(q))
+                if xqprof.ndim == 1:
+                    xqprof = xqprof[:,None]
+                
                 idHdt, its = self._dHdt(pts, xqprof, intens)
                 fom.append(np.sum(idHdt))
                 meas_time.append(np.mean(its))
