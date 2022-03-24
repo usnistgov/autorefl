@@ -621,7 +621,6 @@ class SimReflExperiment(object):
         """ Calculate rate of change of entropy (dH/dt) for measuring at a given Q point
         
         Inputs:
-        Qth -- the Q values represented by each Q profile (length nQ array)
         pts -- the parameter samples underlying each Q profile (nprof x npar array)
         qprofs -- Q profiles (nprof x nQ array)
         incident_neutrons -- intensity ()
@@ -631,7 +630,8 @@ class SimReflExperiment(object):
         n_steps -- (ignored for now) optional parameter defaults to 1: number of forward steps to look
         
         Returns:
-        ????
+        dHdt -- array of dH/dt values for each Q point in qprofs
+        ts -- array of measurement time values for each Q point in qprofs
         """
 
         eta = self.eta  # measure to specified level
@@ -680,7 +680,7 @@ class SimReflExperiment(object):
                     r1idxs = np.unique(r1idxs)
                     
                     # select corresponding parameter values
-                    newpts = pts[r1idxs]
+                    newpts = pts[r1idxs, :]
 
                     # calculate marginalized entropy of selected points
                     iH = ar.calc_entropy(newpts, select_pars=self.sel)
