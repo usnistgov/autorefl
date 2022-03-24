@@ -6,6 +6,7 @@ import dill
 from bumps.fitters import DreamFit, ConsoleMonitor, _fill_defaults, StepMonitor
 from bumps.initpop import generate
 from bumps.mapper import MPMapper
+from bumps.dream.stats import credible_interval
 #from bumps.dream.state import load_state
 #from refl1d.names import FitProblem, Experiment
 from refl1d.resolution import TL2Q, dTdL2dQ
@@ -15,6 +16,7 @@ from matplotlib.gridspec import GridSpec
 #from bumps.mapper import can_pickle, SerialMapper
 from sklearn.linear_model import LinearRegression
 #from scipy.stats import poisson
+from scipy.interpolate import interp1d
 import autorefl as ar
 import instrument
 
@@ -526,7 +528,7 @@ class SimReflExperiment(object):
 
         return df2s, df2s_marg, df2s_marg / df2s
 
-    def calc_foms(self, step):
+    def calc_foms_cov(self, step):
         """Calculate figures of merit for each model, using a Jacobian/covariance matrix approach
 
         Inputs:
@@ -612,6 +614,118 @@ class SimReflExperiment(object):
             foms.append(fom)
             meas_times.append(np.array(meas_time))
             #print(np.vstack((xs, old_meas_time, meas_time)).T)
+
+        return foms, meas_times
+
+    def _dHdt(self, pts, qprofs, incident_neutrons, n_steps=1):
+        """ Calculate rate of change of entropy (dH/dt) for measuring at a given Q point
+        
+        Inputs:
+        Qth -- the Q values represented by each Q profile (length nQ array)
+        pts -- the parameter samples underlying each Q profile (nprof x npar array)
+        qprofs -- Q profiles (nprof x nQ array)
+        incident_neutrons -- intensity ()
+        n_steps -- (ignored for now) optional parameter defaults to 1: number of forward steps to look
+        
+        Returns:
+        ????
+        """
+
+        eta = 0.68  # measure to 1 standard deviation
+        #for _ in range(n_steps):
+        dH = list()
+        dHdt = list()
+        ts = list()
+        goodidxs = list()
+        H0 = ar.calc_entropy(pts, select_pars=self.sel)
+        # cycle through all q values)
+        for idx, intens in enumerate(incident_neutrons):
+            
+            # extract distribution of q profiles
+            iqs = qprofs[:,idx]
+            
+            # calculate median and (eta x 100) CI
+            med, ci = credible_interval(iqs, (0, eta))
+
+            # estimate neutron flux (intens x med) and existing uncertainty
+            xrefl = (intens * med * (np.diff(ci) / med) ** 2)[0]
+
+            # estimate measurement time to equal standard deviation of a gaussian with this CI
+            meastime = (1-eta) / (eta**2 * xrefl)
+
+            # select only curves within the confidence interval
+            # TODO: Use change in llf to resample curves, weighting by llf?
+            crit = ((iqs > ci[0]) & (iqs < ci[1]))
+
+            # find indices of selected curves
+            goodidxs.append(np.arange(len(crit))[crit])
+
+            # select corresponding parameter values
+            newpts = pts[crit]
+
+            # calculate marginalized entropy of selected points
+            iH = ar.calc_entropy(newpts, select_pars=self.sel)
+
+            # calculate differential entropy from initial state
+            dH.append(H0 - iH)
+            dHdt.append((H0 - iH) / meastime)
+            ts.append(meastime)
+        
+        # selection (vestigial if n_steps == 1, used if doing multiple forecasting)
+        maxidx = np.where(dHdt==np.max(dHdt))[0][0]
+        goodidx = goodidxs[maxidx]
+        pts = pts[goodidx,:]
+        qprofs = qprofs[goodidx,:]
+
+        return np.array(dHdt), np.array(ts)
+
+    def calc_foms(self, step):
+        """Calculate figures of merit for each model, using sampled R(Q) to predict multiple steps ahead
+
+        Inputs:
+        step -- the step to analyze. Assumes that the step has been fit so
+                step.draw and step.qprofs exist
+
+        Returns:
+        foms -- list of figures of merit (ndarrays), one for each model in self.problem
+        meastimes -- list of suggested measurement times at each Q value, one for each model
+        """
+
+        foms = list()
+        meas_times = list()
+        pts = step.draw.points
+        # Cycle through models, with model-specific x, Q, calculated q profiles, and measurement background level
+        for mnum, (m, xs, Qth, qprof, qbkg) in enumerate(zip(self.models, self.x, self.measQ, step.qprofs, self.meas_bkg)):
+
+            # get the incident intensity for all x values
+            incident_neutrons = self.instrument.intensity(xs)
+
+            # define signal to background. For now, this is just a scaling factor on the effective rate
+            # reference: Hoogerheide et al. J Appl. Cryst. 2022
+            sbr = qprof / qbkg
+            refl = qprof/(1+2/sbr)
+            refl = np.clip(refl, a_min=0, a_max=None)
+
+            interp_refl = interp1d(Qth, refl, axis=1)
+
+            # Calculate figures of merit and proposed measurement times
+            fom = list()
+            meas_time = list()
+            for x, intens in zip(xs, incident_neutrons):
+                q = self.instrument.x2q(x)
+                #xrefl = intens * np.interp(q, Qth, refl * (minstd/np.mean(qprof, axis=0))**2)
+                # TODO: check this. Should it be the average of xrefl, or the sum?
+                #old_meas_time.append(np.mean((1-self.eta) / (self.eta**2 * xrefl)))
+
+                # calculate the figure of merit
+                xqprof = np.array(interp_refl(q), ndmin=2).T
+
+                idHdt, its = self._dHdt(pts, xqprof, intens)
+                fom.append(np.sum(idHdt))
+                meas_time.append(np.mean(its))
+
+            foms.append(fom)
+            meas_times.append(np.array(meas_time))
 
         return foms, meas_times
 
