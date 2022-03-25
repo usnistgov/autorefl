@@ -528,6 +528,25 @@ class SimReflExperiment(object):
 
         return df2s, df2s_marg, df2s_marg / df2s
 
+    def smooth_dR(self):
+        """ Estimate local dR by smoothing over neighboring points. Smoothing is done using a Gaussian kernel with width dQ.
+        
+        Returns:
+            all_smoothed_dR -- list of arrays with smoothed dR, one for each model. Each array is the same shape as dR.
+        
+        """
+
+        all_smoothed_dR = list()
+        for m in self.models:
+            Q, dR = m.fitness.probe.Q, m.fitness.probe.dR
+            smoothed_dR = list()
+            for Qi, dQi in zip(Q, m.fitness.probe.dQ):
+                kernel = 1./(2*np.pi*dQi**2) * np.exp(-(Q - Qi) ** 2 / (2 * dQi **2))
+                smoothed_dR.append(np.sum(dR * kernel / dR ** 2) / np.sum(kernel / dR ** 2))
+            all_smoothed_dR.append(np.array(smoothed_dR))
+
+        return all_smoothed_dR
+
     def calc_foms_cov(self, step):
         """Calculate figures of merit for each model, using a Jacobian/covariance matrix approach
 
@@ -542,8 +561,9 @@ class SimReflExperiment(object):
 
         foms = list()
         meas_times = list()
+        smoothed_dR = self.smooth_dR()
         # Cycle through models, with model-specific x, Q, calculated q profiles, and measurement background level
-        for mnum, (m, xs, Qth, qprof, qbkg) in enumerate(zip(self.models, self.x, self.measQ, step.qprofs, self.meas_bkg)):
+        for mnum, (m, xs, Qth, qprof, qbkg, sdR) in enumerate(zip(self.models, self.x, self.measQ, step.qprofs, self.meas_bkg, smoothed_dR)):
 
             # get the incident intensity for all x values
             incident_neutrons = self.instrument.intensity(xs)
@@ -556,15 +576,9 @@ class SimReflExperiment(object):
 
             # q-dependent noise. Use the minimum of the actual spread in Q and the expected spread from the nearest points. 
             # This can get stuck if the spread changes too rapidly, so dR is smoothed by dQ.
-            smoothed_dR = list()
-            Q, dR = m.fitness.probe.Q, m.fitness.probe.dR
-            for Qi, dQi in zip(Q, m.fitness.probe.dQ):
-                kernel = 1./(2*np.pi*dQi**2) * np.exp(-(Q - Qi) ** 2 / (2 * dQi **2))
-                smoothed_dR.append(np.sum(dR * kernel / dR ** 2) / np.sum(kernel / dR ** 2))
-
             # TODO: Is this really the right thing to do? Should probably just be the actual spread; the problem is that if
             # the spread doesn't constrain the variables very much, then we just keep measuring at the same point over and over.
-            minstd = np.min(np.vstack((np.std(qprof, axis=0), np.interp(Qth, m.fitness.probe.Q, smoothed_dR))), axis=0)
+            minstd = np.min(np.vstack((np.std(qprof, axis=0), np.interp(Qth, m.fitness.probe.Q, sdR))), axis=0)
             normrefl = refl * (minstd/np.mean(qprof, axis=0))**4
 
             # Calculate marginalization efficiency
@@ -747,7 +761,7 @@ class SimReflExperiment(object):
                 
                 idHdt, its = self._dHdt(pts, xqprof, intens)
                 fom.append(np.sum(idHdt))
-                meas_time.append(np.mean(its))
+                meas_time.append(1./np.sum(1./its))
 
             foms.append(fom)
             meas_times.append(np.array(meas_time))
