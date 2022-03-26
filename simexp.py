@@ -528,8 +528,9 @@ class SimReflExperiment(object):
 
         return df2s, df2s_marg, df2s_marg / df2s
 
-    def smooth_dR(self):
+    def _smoothed_dR(self):
         """ Estimate local dR by smoothing over neighboring points. Smoothing is done using a Gaussian kernel with width dQ.
+            Does NOT update dR from current data points.
         
         Returns:
             all_smoothed_dR -- list of arrays with smoothed dR, one for each model. Each array is the same shape as dR.
@@ -561,9 +562,9 @@ class SimReflExperiment(object):
 
         foms = list()
         meas_times = list()
-        smoothed_dR = self.smooth_dR()
+        
         # Cycle through models, with model-specific x, Q, calculated q profiles, and measurement background level
-        for mnum, (m, xs, Qth, qprof, qbkg, sdR) in enumerate(zip(self.models, self.x, self.measQ, step.qprofs, self.meas_bkg, smoothed_dR)):
+        for mnum, (m, xs, Qth, qprof, qbkg, sdR) in enumerate(zip(self.models, self.x, self.measQ, step.qprofs, self.meas_bkg, self._smoothed_dR())):
 
             # get the incident intensity for all x values
             incident_neutrons = self.instrument.intensity(xs)
@@ -631,13 +632,14 @@ class SimReflExperiment(object):
 
         return foms, meas_times
 
-    def _dHdt(self, pts, qprofs, incident_neutrons, n_steps=1, resample=0):
+    def _dHdt(self, pts, qprofs, incident_neutrons, dR, n_steps=1, resample=0):
         """ Calculate rate of change of entropy (dH/dt) for measuring at a given Q point
         
         Inputs:
         pts -- the parameter samples underlying each Q profile (nprof x npar array)
-        qprofs -- Q profiles (nprof x nQ array)
-        incident_neutrons -- intensity ()
+        qprofs -- Q profiles (nprof x len(self.measQ[modelnum]) array)
+        incident_neutrons -- intensity (nQpoints array)
+        dR -- local estimate of data dR (nQpoints array)
         resample -- attempt to find best point by resampling Q profiles and averaging entropy decrease.
                     defaults to 0 (resampling off); use a nonzero integer for number of resamples (should
                     be at least 10 but becomes computationally expensive as it grows)
@@ -660,26 +662,30 @@ class SimReflExperiment(object):
         rng = np.random.default_rng()
 
         # cycle through all q values)
-        for idx, intens in enumerate(incident_neutrons):
+        for idx, (intens, idR) in enumerate(zip(incident_neutrons, dR)):
             
             # extract distribution of q profiles
             iqs = qprofs[:,idx]
             iqs_sorted = np.sort(iqs)
             
             # calculate median and (eta x 100) CI
-            med, ci = credible_interval(iqs_sorted, (0, eta))
+            med, ci, ci1 = credible_interval(iqs_sorted, (0, eta, 0.68))
             med = med[0]
-            eff_sigma = 0.5 * np.diff(ci)[0]
+            eff_sigma = 0.5 * np.diff(ci1)[0]
+
+            # check that spread in sampled q profiles isn't significantly greater than spread in data 
+            if eff_sigma > idR:
+                # effective eta = 0.68 in this branch
+                meas_sigma = idR
+            else:
+                meas_sigma = 0.5 * np.diff(ci)[0]
 
             # estimate neutron flux (intens x med) and existing uncertainty
-            xrefl = (intens * med * (eff_sigma / med) ** 2)
+            xrefl = (intens * med * (meas_sigma / med) ** 2)
 
             # estimate measurement time to equal standard deviation of a gaussian with this CI
             #meastime = (1-eta) / (eta**2 * xrefl)
             meastime = 1.0 / xrefl
-
-            # calculate probability density of new distribution
-            p = (2 * np.pi * eff_sigma ** 2) * np.exp(-(iqs_sorted - med) ** 2 / (2 * eff_sigma) ** 2)
 
             if resample == 0:
                 # if not resampling, just take all curves in the specified confidence interval
@@ -687,6 +693,10 @@ class SimReflExperiment(object):
                 r1idxs = np.arange(len(crit))[crit]
                 iH = ar.calc_entropy(pts[crit, :], select_pars=self.sel)
             else:
+                # calculate probability density of new distribution
+                p = (2 * np.pi * meas_sigma ** 2) * np.exp(-(iqs_sorted - med) ** 2 / (2 * meas_sigma) ** 2)
+
+                # perform resampling
                 iHs = list()
                 for _ in range(int(resample)):
                     # resample original curves
@@ -709,10 +719,10 @@ class SimReflExperiment(object):
             goodidxs.append(r1idxs)
         
         # selection (vestigial if n_steps == 1, used if doing multiple forecasting)
-        maxidx = np.where(dHdt==np.max(dHdt))[0][0]
-        goodidx = goodidxs[maxidx]
-        pts = pts[goodidx,:]
-        qprofs = qprofs[goodidx,:]
+        #maxidx = np.where(dHdt==np.max(dHdt))[0][0]
+        #goodidx = goodidxs[maxidx]
+        #pts = pts[goodidx,:]
+        #qprofs = qprofs[goodidx,:]
 
         return np.array(dHdt), np.array(ts)
 
@@ -732,7 +742,7 @@ class SimReflExperiment(object):
         meas_times = list()
         pts = step.draw.points
         # Cycle through models, with model-specific x, Q, calculated q profiles, and measurement background level
-        for mnum, (m, xs, Qth, qprof, qbkg) in enumerate(zip(self.models, self.x, self.measQ, step.qprofs, self.meas_bkg)):
+        for mnum, (m, xs, Qth, qprof, qbkg, sdR) in enumerate(zip(self.models, self.x, self.measQ, step.qprofs, self.meas_bkg, self._smoothed_dR())):
 
             # get the incident intensity for all x values
             incident_neutrons = self.instrument.intensity(xs)
@@ -744,6 +754,8 @@ class SimReflExperiment(object):
             refl = np.clip(refl, a_min=0, a_max=None)
 
             interp_refl = interp1d(Qth, refl, axis=1)
+            interp_refl_std = interp1d(m.fitness.probe.Q, sdR, fill_value=(sdR[0], sdR[-1]), bounds_error=False)
+            
 
             # Calculate figures of merit and proposed measurement times
             fom = list()
@@ -759,7 +771,9 @@ class SimReflExperiment(object):
                 if xqprof.ndim == 1:
                     xqprof = xqprof[:,None]
                 
-                idHdt, its = self._dHdt(pts, xqprof, intens)
+                xrefl_std = np.array(interp_refl_std(q), ndmin=1)
+                
+                idHdt, its = self._dHdt(pts, xqprof, intens, xrefl_std)
                 fom.append(np.sum(idHdt))
                 meas_time.append(1./np.sum(1./its))
 
