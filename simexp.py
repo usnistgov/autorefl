@@ -694,7 +694,7 @@ class SimReflExperiment(object):
                 iH = ar.calc_entropy(pts[crit, :], select_pars=self.sel)
             else:
                 # calculate probability density of new distribution
-                p = (2 * np.pi * meas_sigma ** 2) * np.exp(-(iqs_sorted - med) ** 2 / (2 * meas_sigma) ** 2)
+                p = (2 * np.pi * meas_sigma ** 2) ** -0.5 * np.exp(-(iqs_sorted - med) ** 2 / (2 * meas_sigma ** 2))
 
                 # perform resampling
                 iHs = list()
