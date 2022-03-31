@@ -15,7 +15,7 @@ from matplotlib import cm, colors
 from matplotlib.gridspec import GridSpec
 #from bumps.mapper import can_pickle, SerialMapper
 from sklearn.linear_model import LinearRegression
-#from scipy.stats import poisson
+from scipy.stats import norm
 from scipy.interpolate import interp1d
 import autorefl as ar
 import instrument
@@ -406,7 +406,7 @@ class SimReflExperiment(object):
 
         step = self.steps[-1]
         step.chain_pop = chains[-1, :, :]
-        step.draw = fitter.state.draw(thin=int(self.fit_options['steps']*0.2))
+        step.draw = fitter.state.draw(thin=int(self.fit_options['steps']*0.05))
         step.best_logp = fitter.state.best()[1]
         self.problem.setp(fitter.state.best()[0])
         step.final_chisq = self.problem.chisq_str()
@@ -632,7 +632,7 @@ class SimReflExperiment(object):
 
         return foms, meas_times
 
-    def _dHdt(self, pts, qprofs, incident_neutrons, dR, n_steps=1, resample=0):
+    def _dHdt(self, pts, qprofs, incident_neutrons, dR, n_steps=1, resample=0, ci_level=0.68):
         """ Calculate rate of change of entropy (dH/dt) for measuring at a given Q point
         
         Inputs:
@@ -644,6 +644,7 @@ class SimReflExperiment(object):
                     defaults to 0 (resampling off); use a nonzero integer for number of resamples (should
                     be at least 10 but becomes computationally expensive as it grows)
         n_steps -- (ignored for now) optional parameter defaults to 1: number of forward steps to look
+        ci_level -- confidence level at which to do the dH/dt calculation (not the measurement time calculation)
         
         Returns:
         dHdt -- array of dH/dt values for each Q point in qprofs
@@ -651,9 +652,11 @@ class SimReflExperiment(object):
         """
 
         eta = self.eta  # measure to specified level
+        zvalue = norm.interval(ci_level, loc=0, scale=1.0)[1]
         #for _ in range(n_steps):
         dH = list()
         dHdt = list()
+        ddHdt = list()
         ts = list()
         goodidxs = list()
         H0 = ar.calc_entropy(pts, select_pars=self.sel)
@@ -669,29 +672,41 @@ class SimReflExperiment(object):
             iqs_sorted = np.sort(iqs)
             
             # calculate median and (eta x 100) CI
-            med, ci, ci1 = credible_interval(iqs_sorted, (0, eta, 0.68))
+            med, ci, ci1 = credible_interval(iqs_sorted, (0, eta, ci_level))
             med = med[0]
             eff_sigma = 0.5 * np.diff(ci1)[0]
 
             # check that spread in sampled q profiles isn't significantly greater than spread in data 
-            if eff_sigma > idR:
+            if False: #eff_sigma > idR * zvalue:
                 # effective eta = 0.68 in this branch
-                meas_sigma = idR
+                meas_sigma = idR * zvalue
             else:
                 meas_sigma = 0.5 * np.diff(ci)[0]
 
             # estimate neutron flux (intens x med) and existing uncertainty
-            xrefl = (intens * med * (meas_sigma / med) ** 2)
+            xrefl_meas = (intens * med * (meas_sigma / med) ** 2)
+            xrefl_select = (intens * med * (eff_sigma / med) ** 2)
 
             # estimate measurement time to equal standard deviation of a gaussian with this CI
             #meastime = (1-eta) / (eta**2 * xrefl)
-            meastime = 1.0 / xrefl
+            meastime = 1.0 / xrefl_meas
+            selecttime = 1.0 / xrefl_select
 
             if resample == 0:
                 # if not resampling, just take all curves in the specified confidence interval
-                crit = (iqs > ci[0]) & (iqs < ci[1])
+                crit = (iqs > ci1[0]) & (iqs < ci1[1])
                 r1idxs = np.arange(len(crit))[crit]
-                iH = ar.calc_entropy(pts[crit, :], select_pars=self.sel)
+                if False:
+                    iHs = list()
+                    for _ in range(100):
+                        iidx = rng.choice(r1idxs, size=int(len(r1idxs)), replace=True)
+                        iHs.append(ar.calc_entropy(pts[iidx, :], select_pars=self.sel))
+                    iH = np.mean(iHs)
+                    diH = np.std(iHs)
+                else:
+                    iH = ar.calc_entropy(pts[r1idxs, :], select_pars=self.sel)
+                    diH = 0.0
+
             else:
                 # calculate probability density of new distribution
                 p = (2 * np.pi * meas_sigma ** 2) ** -0.5 * np.exp(-(iqs_sorted - med) ** 2 / (2 * meas_sigma ** 2))
@@ -711,10 +726,12 @@ class SimReflExperiment(object):
 
                     iHs.append(iH)
                 iH = np.mean(iHs)
+                diH = np.std(iHs)
 
             # calculate differential entropy from initial state
             dH.append(H0 - iH)
-            dHdt.append((H0 - iH) / meastime)
+            dHdt.append((H0 - iH) / selecttime)
+            ddHdt.append(diH / selecttime)
             ts.append(meastime)
             goodidxs.append(r1idxs)
         
@@ -724,7 +741,7 @@ class SimReflExperiment(object):
         #pts = pts[goodidx,:]
         #qprofs = qprofs[goodidx,:]
 
-        return np.array(dHdt), np.array(ts)
+        return np.array(dHdt), np.array(ddHdt), np.array(ts)
 
     def calc_foms(self, step):
         """Calculate figures of merit for each model, using sampled R(Q) to predict multiple steps ahead
@@ -773,8 +790,8 @@ class SimReflExperiment(object):
                 
                 xrefl_std = np.array(interp_refl_std(q), ndmin=1)
                 
-                idHdt, its = self._dHdt(pts, xqprof, intens, xrefl_std)
-                fom.append(np.sum(idHdt))
+                idHdt, iddHdt, its = self._dHdt(pts, xqprof, intens, xrefl_std)
+                fom.append(np.sum(idHdt - iddHdt))
                 meas_time.append(1./np.sum(1./its))
 
             foms.append(fom)
@@ -836,6 +853,16 @@ class SimReflExperiment(object):
             L = self.instrument.L(newx)[0]
             dL = self.instrument.dL(newx)[0]
             #print(T, dT, L, dL)
+
+            # for simulating data, need to subtract theta_offset from calculation models
+            # not all probes have theta_offset, however
+            # for now this is turned off. 
+            if False:
+                try:
+                    to_calc = self.calcmodels[mnum].fitness.probe.theta_offset.value
+                except AttributeError:
+                    to_calc = 0.0
+
             calcR = ar.calc_expected_R(self.calcmodels[mnum].fitness, T, dT, L, dL, oversampling=self.oversampling, resolution='normal')
             #print('expected R:', calcR)
             incident_neutrons = self.instrument.intensity(newx) * new_meastime
