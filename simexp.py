@@ -442,8 +442,11 @@ class SimReflExperiment(object):
         step = self.steps[-1]
         
         # Calculate figures of merit and proposed measurement times
+        print('Calculating figures of merit:')
+        init_time = time.time()
         step.foms, step.meastimes = self.calc_foms(step)
-
+        print('Calculation time: %f' % (time.time() - init_time))
+        
         # Apply the minimum measurement time
         # TODO: Consider whether the minimum measurement time should be tied to the movement time?
         min_meas_times = [np.maximum(np.full_like(meastime, self.min_meas_time), meastime) for meastime in step.meastimes]
@@ -770,7 +773,7 @@ class SimReflExperiment(object):
             refl = qprof/(1+2/sbr)
             refl = np.clip(refl, a_min=0, a_max=None)
 
-            interp_refl = interp1d(Qth, refl, axis=1)
+            interp_refl = interp1d(Qth, refl, axis=1, fill_value=(refl[:,0], refl[:,-1]), bounds_error=False)
             interp_refl_std = interp1d(m.fitness.probe.Q, sdR, fill_value=(sdR[0], sdR[-1]), bounds_error=False)
             
 
