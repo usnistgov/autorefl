@@ -216,7 +216,7 @@ class CANDOR(ReflectometerBase):
         #ps1 = np.polynomial.polynomial.polyfit(s1, intens, 1)
 
     def x2q(self, x):
-        return a2q(x, self.L(x))
+        return a2q(self.T(x), self.L(x))
 
     def x2a(self, x):
         return x
