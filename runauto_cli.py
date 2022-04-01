@@ -102,6 +102,21 @@ if __name__ == '__main__':
                 exp.switch_time_penalty = args.timepenalty # takes time to switch models
                 if args.instrument == 'MAGIK':
                     exp.x = exp.measQ
+                elif args.instrument == 'CANDOR':
+                    for i, measQ in enumerate(exp.measQ):
+                        x = list()
+                        overlap = 0.90
+                        xrng = exp.instrument.qrange2xrange([min(measQ), max(measQ)])
+                        x.append(xrng[0])
+                        while x[-1] < xrng[1]:
+                            curq = exp.instrument.x2q(x[-1])
+                            curminq, curmaxq = np.min(curq), np.max(curq)
+                            newrng = exp.instrument.qrange2xrange([curminq + (curmaxq - curminq) * (1 - overlap), max(measQ)])
+                            x.append(newrng[0])
+                        x[-1] = xrng[1]
+                        x = np.array(x)
+                        exp.x[i] = x
+
                 exp.add_initial_step()
                 total_t = 0.0
                 k = 0
@@ -124,7 +139,15 @@ if __name__ == '__main__':
         # control measurement
         else:
             # calculation vector
-            measQ = [m.fitness.probe.Q for m in model.models]  
+            if args.instrument == 'CANDOR':
+                qstep = 0.0005
+                qstep_max = 0.0024
+                qmax = 0.25
+                qmin = 0.008
+                dq = np.linspace(qstep,qstep_max, int(np.ceil(2*(qmax-qmin)/(qstep_max+qstep))))
+                measQ = (qmin-qstep) + np.cumsum(dq)
+            else:
+                measQ = [m.fitness.probe.Q for m in model.models]
 
             # meastimes
             meastimes = np.diff(np.insert(np.logspace(1, np.log10(args.maxtime), args.nctrlpts, endpoint=True), 0, 0))
@@ -138,6 +161,29 @@ if __name__ == '__main__':
 
             for kk in range(args.nrepeats):
                 exp = SimReflExperimentControl(model, measQ, instrument=instr, model_weights=model_weights, eta=args.eta, fit_options=fit_options, oversampling=args.oversampling, bestpars=bestp, select_pars=sel, meas_bkg=meas_bkg)
+                if args.instrument == 'CANDOR':
+                    for i, measQ in enumerate(exp.measQ):
+                        x = list()
+                        overlap = 0.75
+                        xrng = exp.instrument.qrange2xrange([min(measQ), max(measQ)])
+                        x.append(xrng[0])
+                        while x[-1] < xrng[1]:
+                            curq = exp.instrument.x2q(x[-1])
+                            curminq, curmaxq = np.min(curq), np.max(curq)
+                            newrng = exp.instrument.qrange2xrange([curminq + (curmaxq - curminq) * (1 - overlap), max(measQ)])
+                            x.append(newrng[0])
+                        x[-1] = xrng[1]
+                        x = np.array(x)
+                        exp.x[i] = x
+
+                    model_weights = np.array(model_weights) / np.sum(model_weights)
+
+                    exp.meastimeweights = list()
+                    for x, weight in zip(exp.x, model_weights):
+                        exp.meastimeweights.append(weight * np.array(x)**2 / np.sum(np.array(x)**2))
+
+                    print(exp.x, len(exp.x[0]))
+
                 total_t = 0.0
                 k = 0
                 for meastime in meastimes:
