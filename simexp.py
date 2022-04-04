@@ -817,7 +817,7 @@ class SimReflExperiment(object):
                 fom.append(np.sum(idHdt - iddHdt))
                 meas_time.append(1./np.sum(1./its))
 
-            foms.append(fom)
+            foms.append(np.array(fom))
             meas_times.append(np.array(meas_time))
 
         return foms, meas_times
