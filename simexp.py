@@ -432,7 +432,7 @@ class SimReflExperiment(object):
         Procedure:
             1. Calculate the figures of merit
             2. Apply penalties to the figures of merit
-            TODO: apply penalties as a separate "cost function"
+            TODO: apply penalties as a separate "cost function" (partially complete)
             3. Identify and produce the next self.npoints data points
                 to simulate/measure
             4. Add a new step for fitting.
@@ -446,30 +446,16 @@ class SimReflExperiment(object):
         init_time = time.time()
         step.foms, step.meastimes = self.calc_foms(step)
         print('Calculation time: %f' % (time.time() - init_time))
-        
-        # Apply the minimum measurement time
-        # TODO: Consider whether the minimum measurement time should be tied to the movement time?
-        min_meas_times = [np.maximum(np.full_like(meastime, self.min_meas_time), meastime) for meastime in step.meastimes]
 
+        # Determine next measurement point(s)
         points = []
-        
-        # Apply penalties to the figure of merit and find the optimal next point
         for i in range(self.npoints):
-            # calculate movement time penalty (and time penalty to switch models if applicable)
-            switch_time_penalty = [0.0 if j == self.curmodel else self.switch_time_penalty for j in range(self.nmodels)]
-            movepenalty = [meastime / (meastime + self.instrument.movetime(x) + pen) for x, meastime, pen in zip(self.x, min_meas_times, switch_time_penalty)]
-
-            # all models incur switch penalty except the current one
-            spenalty = [1.0 if j == self.curmodel else self.switch_penalty for j in range(self.nmodels)]
-            step.scaled_foms = [fom * movepen / pen for fom, pen, movepen in zip(step.foms, spenalty, movepenalty)]
-
-            if False:
-                for fom, scaled_fom, x in zip(step.foms, step.scaled_foms, self.x):
-                    p = plt.semilogy(x, fom, '--')
-                    plt.semilogy(x, scaled_fom, '-', color=p[0].get_color())
-                
-                plt.show()
-
+            
+            # Apply penalties
+            step.scaled_foms = self._apply_fom_penalties(step.foms, curmodel=self.curmodel)
+            step.scaled_foms = self._apply_time_penalties(step.scaled_foms, step.meastimes, curmodel=self.curmodel)
+            
+            # Select the new point
             newpoint = self.select_new_point(step, start=i)
 
             # newpoint can be None if not enough maxima in the fom are found. In this case
@@ -493,6 +479,40 @@ class SimReflExperiment(object):
     def add_step(self, points, use=True):
         # Adds a set of DataPoint objects as a new ExperimentStep
         self.steps.append(ExperimentStep(points, use=use))
+
+    def _apply_fom_penalties(self, foms, curmodel=None):
+        # Applies any penalties that scale the figures of merit directly
+        if curmodel is None:
+            curmodel = self.curmodel
+
+        # Calculate switching penalty
+        spenalty = [1.0 if j == curmodel else self.switch_penalty for j in range(self.nmodels)]
+
+        # Perform scaling
+        scaled_foms = [fom  / pen for fom, pen in zip(foms, spenalty)]
+
+        return scaled_foms
+
+    def _apply_time_penalties(self, foms, meastimes, curmodel=None):
+        # Applies any penalties that act to increase the measurement time, e.g. movement penalties or model switch time penalities
+        # NOTE: uses current state of the instrument (self.instrument.x).
+        if curmodel is None:
+            curmodel = self.curmodel
+
+        # Apply minimum to proposed measurement times
+        min_meas_times = [np.maximum(np.full_like(meastime, self.min_meas_time), meastime) for meastime in meastimes]
+
+        # Calculate time penalty to switch models
+        switch_time_penalty = [0.0 if j == curmodel else self.switch_time_penalty for j in range(self.nmodels)]
+
+        # Add all movement time penalties together.
+        movepenalty = [meastime / (meastime + self.instrument.movetime(x) + pen) for x, meastime, pen in zip(self.x, min_meas_times, switch_time_penalty)]
+
+        # Perform scaling
+        scaled_foms = [fom * movepen for fom,movepen in zip(foms, movepenalty)]
+
+        return scaled_foms
+
 
     def _marginalization_efficiency(self, Qth, qprof, points):
         """ Calculate the marginalization efficiency: the fraction of uncertainty in R(Q) that
@@ -802,20 +822,21 @@ class SimReflExperiment(object):
 
         return foms, meas_times
 
-    def select_new_point(self, step, start=0):
-        """Find a single new point to measure from the figure of merit
+    def _find_fom_maxima(self, scaled_foms, start=0):
+        """Finds all maxima in the figure of merit, including the end points
         
-        Inputs:
-        step -- the step to analyze. Assumes that step has foms (figures of merit) and
-                measurement times precalculated
-        start -- index of figure of merit maxima to begin searching. Allows multiple points
-                to be identified by calling select_new_point sequentially, incrementing "start"
+            Inputs:
+            scaled_foms -- figures of merit. They don't have to be scaled, but it should be the "final"
+                            FOM with any penalties already applied
+            start -- index of the first peak to select. Defaults to zero (start with the highest).
 
-        Returns:
-        a DataPoint object containing the new point with simulated data
+            Returns:
+            top_n -- sorted list 
+
         """
 
-        # TODO: Implement a more random algorithm. One idea is to define a partition function
+        # TODO: Implement a more random algorithm (probably best appplied in a different function 
+        #       to the maxima themselves). One idea is to define a partition function
         #       Z = np.exp(fom / np.mean(fom)) - 1. The fom is then related to ln(Z(x)). Points are chosen
         #       using np.random.choice(x, size=self.npoints, p=Z/np.sum(Z)).
         #       I think that penalties will have to be applied differently, potentially directly to Z.
@@ -827,7 +848,7 @@ class SimReflExperiment(object):
 
         # find maximum figures of merit in each model
 
-        for fom, Qth in zip(step.scaled_foms, self.measQ):
+        for fom, Qth in zip(scaled_foms, self.measQ):
             
             # a. calculate whether gradient is > 0
             dfom = np.sign(np.diff(np.append(np.insert(fom, 0, 0),0))) < 0
@@ -844,6 +865,56 @@ class SimReflExperiment(object):
         # select top point
         top_n = sorted(maxidxs_m, reverse=True)[start:min(start+1, len(maxidxs_m))][0]
 
+        # returns sorted list of lists, each with entries [max fom value, model number, measQ index]
+        return top_n
+
+    def _generate_new_point(self, mnum, newx, new_meastime, maxfom=None):
+        """ Generates a new data point with simulated data from the specified x
+            position, model number, and measurement time
+            
+            Inputs:
+            mnum -- the model number of the new point
+            newx -- the x position of the new point
+            new_meastime -- the measurement time
+            maxfom -- the maximum of the figure of merit. Only used for record-keeping
+        """
+        
+        T = self.instrument.T(newx)[0]
+        dT = self.instrument.dT(newx)[0]
+        L = self.instrument.L(newx)[0]
+        dL = self.instrument.dL(newx)[0]
+
+        # for simulating data, need to subtract theta_offset from calculation models
+        # not all probes have theta_offset, however
+        # for now this is turned off. 
+        if False:
+            try:
+                to_calc = self.calcmodels[mnum].fitness.probe.theta_offset.value
+            except AttributeError:
+                to_calc = 0.0
+
+        calcR = ar.calc_expected_R(self.calcmodels[mnum].fitness, T, dT, L, dL, oversampling=self.oversampling, resolution='normal')
+        #print('expected R:', calcR)
+        incident_neutrons = self.instrument.intensity(newx) * new_meastime
+        N, Nbkg, Ninc = ar.sim_data_N(calcR, incident_neutrons, resid_bkg=self.resid_bkg[mnum], meas_bkg=self.meas_bkg[mnum])
+        
+        return DataPoint(newx, new_meastime, mnum, (T, dT, L, dL, N[0], Nbkg[0], Ninc[0]), merit=maxfom)
+
+    def select_new_point(self, step, start=0):
+        """Find a single new point to measure from the figure of merit
+        
+        Inputs:
+        step -- the step to analyze. Assumes that step has foms (figures of merit) and
+                measurement times precalculated
+        start -- index of figure of merit maxima to begin searching. Allows multiple points
+                to be identified by calling select_new_point sequentially, incrementing "start"
+
+        Returns:
+        a DataPoint object containing the new point with simulated data
+        """
+
+        top_n = self._find_fom_maxima(step.scaled_foms, start=start)
+
         if len(top_n):
             # generate a DataPoint object with the maximum point
             _, mnum, idx = top_n
@@ -851,30 +922,8 @@ class SimReflExperiment(object):
             newx = self.x[mnum][idx]
             new_meastime = max(step.meastimes[mnum][idx], self.min_meas_time)
 
-            T = self.instrument.T(newx)[0]
-            dT = self.instrument.dT(newx)[0]
-            L = self.instrument.L(newx)[0]
-            dL = self.instrument.dL(newx)[0]
-            #print(T, dT, L, dL)
+            return self._generate_new_point(mnum, newx, new_meastime, maxfom=maxfom)
 
-            # for simulating data, need to subtract theta_offset from calculation models
-            # not all probes have theta_offset, however
-            # for now this is turned off. 
-            if False:
-                try:
-                    to_calc = self.calcmodels[mnum].fitness.probe.theta_offset.value
-                except AttributeError:
-                    to_calc = 0.0
-
-            calcR = ar.calc_expected_R(self.calcmodels[mnum].fitness, T, dT, L, dL, oversampling=self.oversampling, resolution='normal')
-            #print('expected R:', calcR)
-            incident_neutrons = self.instrument.intensity(newx) * new_meastime
-            N, Nbkg, Ninc = ar.sim_data_N(calcR, incident_neutrons, resid_bkg=self.resid_bkg[mnum], meas_bkg=self.meas_bkg[mnum])
-            
-            t = max(self.min_meas_time, new_meastime)
-
-            return DataPoint(newx, t, mnum, (T, dT, L, dL, N[0], Nbkg[0], Ninc[0]), merit=maxfom)
-        
         else:
 
             return None
