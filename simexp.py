@@ -655,18 +655,223 @@ class SimReflExperiment(object):
 
         return foms, meas_times
 
-    def _dHdt(self, pts, qprofs, incident_neutrons, dR, n_steps=1, resample=0, ci_level=0.68):
+    def _fom_from_draw(self, pts, qprofs, select_ci_level=0.68, meas_ci_level=0.50, n_forecast=1):
+        """ Calculate figure of merit from a set of draw points and associated q profiles
+        
+            Inputs:
+            pts -- draw points. Should be already selected for marginalized paramters
+            qprofs -- list of q profiles, one for each model of size <number of samples in pts> x <number of measQ values>
+            ci_level -- confidence interval level to use for selection (default 0.68)
+            n_forecast -- number of forecast steps to take
+
+            Returns:
+            foms -- list of figures of merit
+            meastimes -- associated measurement times per point
+        """
+
+        """shape definitions:
+            X -- number of x values in xs
+            D -- number of detectors
+            N -- number of samples
+            M -- ceil(ci x N)
+            P -- number of marginalized paramters"""
+
+        # Cycle through models, with model-specific x, Q, calculated q profiles, and measurement background level
+        # Populate q vectors, interpolated q profiles (slow), sorted q profiles (slow), and intensities
+        sortidxs = list()
+        intensities = list()
+        intens_shapes = list()
+        qs = list()
+        xqprofs = list()
+        init_time = time.time()
+        for xs, Qth, qprof, qbkg in zip(self.x, self.measQ, qprofs, self.meas_bkg):
+
+            # get the incident intensity and q values for all x values (should have same shape X x D).
+            # flattened dimension is XD
+            incident_neutrons = self.instrument.intensity(xs)
+            init_shape = incident_neutrons.shape
+            incident_neutrons = incident_neutrons.flatten()
+            q = self.instrument.x2q(xs).flatten()
+
+            # define signal to background. For now, this is just a scaling factor on the effective rate
+            # reference: Hoogerheide et al. J Appl. Cryst. 2022
+            sbr = qprof / qbkg
+            refl = qprof/(1+2/sbr)
+            refl = np.clip(refl, a_min=0, a_max=None)
+
+            # perform interpolation. xqprof should have shape N x XD. This is a slow step (and should only be done once)
+            interp_refl = interp1d(Qth, refl, axis=1, fill_value=(refl[:,0], refl[:,-1]), bounds_error=False)
+            xqprof = np.array(interp_refl(q))
+
+            # Sort xqprofs (again, should only have to be done once)
+            idxs = np.argsort(xqprof, axis=0)
+
+            sortidxs.append(idxs)
+            intensities.append(incident_neutrons)
+            intens_shapes.append(init_shape)
+            qs.append(q)
+            xqprofs.append(xqprof)
+
+        print(f'Setup time: {time.time() - init_time}')
+
+        all_foms = list()
+        all_meas_times = list()
+        all_H0 = list()
+        all_new = list()
+        org_curmodel = self.curmodel
+        org_x = self.instrument.x
+
+        """For each stage of the forecast, go through:
+            1. Calculate the foms
+            2. Select the new points
+            3. Repeat
+        """
+        for i in range(n_forecast):
+            init_time = time.time()
+            Hlist = list()
+            foms = list()
+            meas_times = list()
+            #newidxs_select = list()
+            newidxs_meas = list()
+            newxqprofs = list()
+            N, P = pts.shape
+            minci_sel, maxci_sel =  int(np.floor(N * (1 - select_ci_level) / 2)), int(np.ceil(N * (1 + select_ci_level) / 2))
+            minci_meas, maxci_meas =  int(np.floor(N * (1 - meas_ci_level) / 2)), int(np.ceil(N * (1 + meas_ci_level) / 2))
+            H0 = ar.calc_entropy(pts)   # already marginalized!!
+            all_H0.append(H0)
+            # cycle though models
+            for incident_neutrons, init_shape, q, xqprof in zip(intensities, intens_shapes, qs, xqprofs):
+
+                init_time2a = time.time()
+                idxs = np.argsort(xqprof, axis=0)
+                #print(f'Sort time: {time.time() - init_time2a}')
+                #print(idxs.shape)
+
+                # Select new points and indices in CI. Now has dimension M x XD X P
+                A = np.take_along_axis(pts[:, None, :], idxs[:, :, None], axis=0)[minci_sel:maxci_sel]
+                
+                init_time2a = time.time()
+                # calculate new index arrays and xqprof values
+                # this also works: meas_sigma = 0.5*np.diff(np.take_along_axis(xqprof, idxs[[minci, maxci],:], axis=0), axis=0)
+                newidx = idxs[minci_meas:maxci_meas]
+                meas_xqprof = np.take_along_axis(xqprof, newidx, axis=0)#[minci:maxci]
+                meas_sigma = 0.5 * (np.max(meas_xqprof, axis=0) - np.min(meas_xqprof, axis=0))
+                sel_xqprof = np.take_along_axis(xqprof, idxs[minci_sel:maxci_sel], axis=0)#[minci:maxci]
+                sel_sigma = 0.5 * (np.max(sel_xqprof, axis=0) - np.min(sel_xqprof, axis=0))
+
+                #print(f'Sel calc time: {time.time() - init_time2a}')
+                
+                #sel_sigma = 0.5 * np.diff(np.take_along_axis(xqprof, idxs[[minci_sel, maxci_sel],:], axis=0), axis=0)
+                #meas_sigma = 0.5 * np.diff(np.take_along_axis(xqprof, idxs[[minci_meas, maxci_meas],:], axis=0), axis=0)
+
+                init_time2 = time.time()
+                # Condition shape (now has dimension XD X P X M)
+                A = np.moveaxis(A, 0, -1)
+                A = A - np.mean(A, axis=-1, keepdims=True)
+                A_T = np.swapaxes(A, -1, -2)
+
+                # Calculate covariance matrix (shape XD X P X P)
+                covs = np.einsum('ikl,ilm->ikm', A, A_T, optimize='greedy') / (A.shape[-1] - 1)
+
+                #covs = list()
+                #for a in A:
+                #    covs.append(np.cov(a))
+
+                #print(f'Cov time: {time.time() - init_time2}')
+                
+                # Calculate determinant (shape XD)
+                _, dets = np.linalg.slogdet(covs)
+                Hs = 0.5 * P * (np.log(2 * np.pi) + 1) + dets
+
+                # Calculate measurement times (shape XD)
+                med = np.median(xqprof, axis=0)
+                xrefl_sel = (incident_neutrons * med * (sel_sigma / med) ** 2)
+                xrefl_meas = (incident_neutrons * med * (meas_sigma / med) ** 2)
+                meastime_sel = 1.0 / xrefl_sel
+                meastime_meas = 1.0 / xrefl_meas
+
+                # apply min measurement time (turn this off initially to test operation)
+                #meastime = np.maximum(np.full_like(meastime, self.min_meas_time), meastime)
+
+                # figure of merit is dHdt (reshaped to X x D)
+                dHdt = (H0 - Hs) / meastime_sel
+                dHdt = np.reshape(dHdt, init_shape)
+
+                # calculate fom and average time (shape X)
+                fom = np.sum(dHdt, axis=1)
+                meas_time = 1./ np.sum(1./np.reshape(meastime_meas, init_shape), axis=1)
+
+                Hlist.append(Hs)
+                foms.append(fom)
+                meas_times.append(meas_time)
+                newxqprofs.append(meas_xqprof)
+                newidxs_meas.append(newidx)
+                
+            # populate higher-level lists
+            all_foms.append(foms)
+            all_meas_times.append(meas_times)
+
+            # apply penalties
+            scaled_foms = self._apply_fom_penalties(foms, curmodel=self.curmodel)
+            scaled_foms = self._apply_time_penalties(scaled_foms, meas_times, curmodel=self.curmodel)
+
+            # perform point selection
+            top_n = self._find_fom_maxima(scaled_foms, start=0)
+            #print(top_n)
+            if top_n is not None:
+                _, mnum, idx = top_n
+                newx = self.x[mnum][idx]
+                new_meastime = max(meas_times[mnum][idx], self.min_meas_time)
+                
+                all_new.append([mnum, idx, newx, new_meastime])
+            else:
+                break
+
+            # apply point selection
+            self.instrument.x = newx
+            self.curmodel = mnum
+
+            # choose new points. This is not straightforward if there is more than one detector, because
+            # each point in XD may choose a different detector. We will choose without replacement by frequency.
+            # idx_array has shape M x D
+            idx_array = newidxs_meas[mnum].reshape(-1, *intens_shapes[mnum])[:, idx, :]
+            #print(idx_array.shape)
+            if idx_array.shape[1] == 1:
+                # straightforward case, with 1 detector
+                chosen = np.squeeze(idx_array)
+            else:
+                # select those that appear most frequently
+                #print(idx_array.shape)
+                freq = np.bincount(idx_array.flatten(), minlength=len(pts))
+                freqsort = np.argsort(freq)
+                chosen = freqsort[-idx_array.shape[0]:]
+                
+            newpts = pts[chosen]
+            newxqprofs = [xqprof[chosen] for xqprof in xqprofs]
+
+            # set up next iteration
+            xqprofs = newxqprofs
+            pts = newpts
+
+            print(f'Forecast step {i} time: {time.time() - init_time}')
+            
+        # reset instrument state
+        self.instrument.x = org_x
+        self.curmodel = org_curmodel
+
+        return all_foms, all_meas_times, all_H0, all_new
+
+    def _dHdt(self, pts, qprofs, incident_neutrons, dR, resample=0, ci_level=0.68):
         """ Calculate rate of change of entropy (dH/dt) for measuring at a given Q point
         
         Inputs:
         pts -- the parameter samples underlying each Q profile (nprof x npar array)
         qprofs -- Q profiles (nprof x len(self.measQ[modelnum]) array)
         incident_neutrons -- intensity (nQpoints array)
-        dR -- local estimate of data dR (nQpoints array)
+        dR -- local estimate of data dR (nQpoints array) (not currently used)
         resample -- attempt to find best point by resampling Q profiles and averaging entropy decrease.
                     defaults to 0 (resampling off); use a nonzero integer for number of resamples (should
                     be at least 10 but becomes computationally expensive as it grows)
-        n_steps -- (ignored for now) optional parameter defaults to 1: number of forward steps to look
         ci_level -- confidence level at which to do the dH/dt calculation (not the measurement time calculation)
         
         Returns:
