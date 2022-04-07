@@ -655,18 +655,22 @@ class SimReflExperiment(object):
 
         return foms, meas_times
 
-    def _fom_from_draw(self, pts, qprofs, select_ci_level=0.68, meas_ci_level=0.50, n_forecast=1):
+    def _fom_from_draw(self, pts, qprofs, select_ci_level=0.68, meas_ci_level=None, n_forecast=1):
         """ Calculate figure of merit from a set of draw points and associated q profiles
         
             Inputs:
             pts -- draw points. Should be already selected for marginalized paramters
             qprofs -- list of q profiles, one for each model of size <number of samples in pts> x <number of measQ values>
-            ci_level -- confidence interval level to use for selection (default 0.68)
+            select_ci_level -- confidence interval level to use for selection (default 0.68)
+            meas_ci_level -- confidence interval level to target for measurement (default None, in which case self.eta is used)
             n_forecast -- number of forecast steps to take
 
             Returns:
-            foms -- list of figures of merit
-            meastimes -- associated measurement times per point
+            all_foms -- list (one for each forecast step) of lists of figures of merit (one for each model)
+            all_meastimes -- list (one for each forecast step) of lists of proposed measurement times (one for each model)
+            all_H0 -- list (one for each forecast step) of maximum entropy (not entropy change) before that step
+            all_new -- list of forecasted optimal data points (one for each forecast step). Each element in the list is a list
+                        of properties of the new point with format: [<model number>, <x index>, <x value>, <measurement time>])
         """
 
         """shape definitions:
@@ -676,9 +680,12 @@ class SimReflExperiment(object):
             M -- ceil(ci x N)
             P -- number of marginalized paramters"""
 
+        # use self.eta as measurement confidence interval level
+        if meas_ci_level is None:
+            meas_ci_level = self.eta
+
         # Cycle through models, with model-specific x, Q, calculated q profiles, and measurement background level
-        # Populate q vectors, interpolated q profiles (slow), sorted q profiles (slow), and intensities
-        sortidxs = list()
+        # Populate q vectors, interpolated q profiles (slow), and intensities
         intensities = list()
         intens_shapes = list()
         qs = list()
@@ -703,16 +710,12 @@ class SimReflExperiment(object):
             interp_refl = interp1d(Qth, refl, axis=1, fill_value=(refl[:,0], refl[:,-1]), bounds_error=False)
             xqprof = np.array(interp_refl(q))
 
-            # Sort xqprofs (again, should only have to be done once)
-            idxs = np.argsort(xqprof, axis=0)
-
-            sortidxs.append(idxs)
             intensities.append(incident_neutrons)
             intens_shapes.append(init_shape)
             qs.append(q)
             xqprofs.append(xqprof)
 
-        print(f'Setup time: {time.time() - init_time}')
+        print(f'Forecast setup time: {time.time() - init_time}')
 
         all_foms = list()
         all_meas_times = list()
@@ -742,7 +745,8 @@ class SimReflExperiment(object):
             # cycle though models
             for incident_neutrons, init_shape, q, xqprof in zip(intensities, intens_shapes, qs, xqprofs):
 
-                init_time2a = time.time()
+                #init_time2a = time.time()
+                # TODO: Shouldn't these already be sorted on the second step?
                 idxs = np.argsort(xqprof, axis=0)
                 #print(f'Sort time: {time.time() - init_time2a}')
                 #print(idxs.shape)
@@ -750,7 +754,7 @@ class SimReflExperiment(object):
                 # Select new points and indices in CI. Now has dimension M x XD X P
                 A = np.take_along_axis(pts[:, None, :], idxs[:, :, None], axis=0)[minci_sel:maxci_sel]
                 
-                init_time2a = time.time()
+                #init_time2a = time.time()
                 # calculate new index arrays and xqprof values
                 # this also works: meas_sigma = 0.5*np.diff(np.take_along_axis(xqprof, idxs[[minci, maxci],:], axis=0), axis=0)
                 newidx = idxs[minci_meas:maxci_meas]
@@ -773,6 +777,7 @@ class SimReflExperiment(object):
                 # Calculate covariance matrix (shape XD X P X P)
                 covs = np.einsum('ikl,ilm->ikm', A, A_T, optimize='greedy') / (A.shape[-1] - 1)
 
+                # Alternate approach (slower for small arrays, faster for very large arrays)
                 #covs = list()
                 #for a in A:
                 #    covs.append(np.cov(a))
