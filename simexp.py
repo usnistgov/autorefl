@@ -431,48 +431,45 @@ class SimReflExperiment(object):
         
         Procedure:
             1. Calculate the figures of merit
-            2. Apply penalties to the figures of merit
-            TODO: apply penalties as a separate "cost function" (partially complete)
-            3. Identify and produce the next self.npoints data points
+            2. Identify the next self.npoints data points
                 to simulate/measure
+            (1 and 2 are currently done in _fom_from_draw)
+            3. Simulate the new data points
             4. Add a new step for fitting.
         """
 
         # Focus on the last step
         step = self.steps[-1]
         
-        # Calculate figures of merit and proposed measurement times
+        # Calculate figures of merit and proposed measurement times with forecasting
         print('Calculating figures of merit:')
         init_time = time.time()
-        step.foms, step.meastimes = self.calc_foms(step)
-        print('Calculation time: %f' % (time.time() - init_time))
+        pts = step.draw.points[:, self.sel]
+        qprofs = step.qprofs
+        foms, meastimes, Hs, newpoints = self._fom_from_draw(pts, qprofs, select_ci_level=0.68, meas_ci_level=self.eta, n_forecast=self.npoints)
+        print('Total figure of merit calculation time: %f' % (time.time() - init_time))
 
-        # Determine next measurement point(s)
+        # populate step foms (TODO: current analysis code can't handle multiple foms, could pass all of them in here)
+        step.foms, step.meastimes = foms[0], meastimes[0]
+
+        # Determine next measurement point(s).
+        # Number of points to be used is determined from n_forecast (self.npoints)
+        # NOTE: At some point this could be turned into an asynchronous "point queue"; in this case the following loop will have to be
+        #       over self.npoints
         points = []
-        for i in range(self.npoints):
-            
-            # Apply penalties
-            step.scaled_foms = self._apply_fom_penalties(step.foms, curmodel=self.curmodel)
-            step.scaled_foms = self._apply_time_penalties(step.scaled_foms, step.meastimes, curmodel=self.curmodel)
-            
-            # Select the new point
-            newpoint = self.select_new_point(step, start=i)
+        for pt, fom in zip(newpoints, foms):
+            mnum, idx, newx, new_meastime = pt
+            newpoint = self._generate_new_point(mnum, newx, new_meastime, fom[mnum][idx])
+            newpoint.movet = self.instrument.movetime(newpoint.x)[0]
+            points.append(newpoint)
+            print('New data point:\t' + repr(newpoint))
 
-            # newpoint can be None if not enough maxima in the fom are found. In this case
-            # stop looking for new points
-            if newpoint is not None:
-                newpoint.movet = self.instrument.movetime(newpoint.x)[0]
-                points.append(newpoint)
-                print('New data point:\t' + repr(newpoint))
+            # Once a new point is added, update the current model so model switching
+            # penalties can be reapplied correctly
+            self.curmodel = newpoint.model
 
-                # Once a new point is added, update the current model so model switching
-                # penalties can be reapplied correctly
-                self.curmodel = newpoint.model
-
-                # "move" instrument to new location for calculating the next movement penalty
-                self.instrument.x = newpoint.x
-            else:
-                break
+            # "move" instrument to new location for calculating the next movement penalty
+            self.instrument.x = newpoint.x
         
         self.add_step(points)
 
@@ -516,7 +513,10 @@ class SimReflExperiment(object):
 
     def _marginalization_efficiency(self, Qth, qprof, points):
         """ Calculate the marginalization efficiency: the fraction of uncertainty in R(Q) that
-            arises from the marginal parameters"""
+            arises from the marginal parameters.
+            
+            Used by calc_foms_cov
+            """
 
         # define parameter numbers to select
         marg_points = points[:,self.sel]
@@ -573,6 +573,7 @@ class SimReflExperiment(object):
 
     def calc_foms_cov(self, step):
         """Calculate figures of merit for each model, using a Jacobian/covariance matrix approach
+            Deprecated in favor of dHdt forecasting models
 
         Inputs:
         step -- the step to analyze. Assumes that the step has been fit so
@@ -655,15 +656,15 @@ class SimReflExperiment(object):
 
         return foms, meas_times
 
-    def _fom_from_draw(self, pts, qprofs, select_ci_level=0.68, meas_ci_level=None, n_forecast=1):
+    def _fom_from_draw(self, pts, qprofs, select_ci_level=0.68, meas_ci_level=0.68, n_forecast=1):
         """ Calculate figure of merit from a set of draw points and associated q profiles
         
             Inputs:
             pts -- draw points. Should be already selected for marginalized paramters
             qprofs -- list of q profiles, one for each model of size <number of samples in pts> x <number of measQ values>
             select_ci_level -- confidence interval level to use for selection (default 0.68)
-            meas_ci_level -- confidence interval level to target for measurement (default None, in which case self.eta is used)
-            n_forecast -- number of forecast steps to take
+            meas_ci_level -- confidence interval level to target for measurement (default 0.68, typically use self.eta)
+            n_forecast -- number of forecast steps to take (default 1)
 
             Returns:
             all_foms -- list (one for each forecast step) of lists of figures of merit (one for each model)
@@ -677,12 +678,7 @@ class SimReflExperiment(object):
             X -- number of x values in xs
             D -- number of detectors
             N -- number of samples
-            M -- ceil(ci x N)
             P -- number of marginalized paramters"""
-
-        # use self.eta as measurement confidence interval level
-        if meas_ci_level is None:
-            meas_ci_level = self.eta
 
         # Cycle through models, with model-specific x, Q, calculated q profiles, and measurement background level
         # Populate q vectors, interpolated q profiles (slow), and intensities
@@ -746,7 +742,7 @@ class SimReflExperiment(object):
             for incident_neutrons, init_shape, q, xqprof in zip(intensities, intens_shapes, qs, xqprofs):
 
                 #init_time2a = time.time()
-                # TODO: Shouldn't these already be sorted on the second step?
+                # TODO: Shouldn't these already be sorted by the second step?
                 idxs = np.argsort(xqprof, axis=0)
                 #print(f'Sort time: {time.time() - init_time2a}')
                 #print(idxs.shape)
@@ -858,8 +854,8 @@ class SimReflExperiment(object):
             xqprofs = newxqprofs
             pts = newpts
 
-            print(f'Forecast step {i}:\tNumber of curves: {newpts.shape[0]}\tCalculation time: {time.time() - init_time}')
-            
+            print(f'Forecast step {i}:\tNumber of samples: {N}\tCalculation time: {time.time() - init_time}')
+
         # reset instrument state
         self.instrument.x = org_x
         self.curmodel = org_curmodel
@@ -868,6 +864,7 @@ class SimReflExperiment(object):
 
     def _dHdt(self, pts, qprofs, incident_neutrons, dR, resample=0, ci_level=0.68):
         """ Calculate rate of change of entropy (dH/dt) for measuring at a given Q point
+            Deprecated in favor of _fom_from_draw, which uses numpy operations for speed.
         
         Inputs:
         pts -- the parameter samples underlying each Q profile (nprof x npar array)
@@ -977,7 +974,8 @@ class SimReflExperiment(object):
         return np.array(dHdt), np.array(ddHdt), np.array(ts)
 
     def calc_foms(self, step):
-        """Calculate figures of merit for each model, using sampled R(Q) to predict multiple steps ahead
+        """Calculate figures of merit for each model, using sampled R(Q) to predict maximum deltaH in time
+            (Note: deprecated in favor of forecasting models)
 
         Inputs:
         step -- the step to analyze. Assumes that the step has been fit so
@@ -1111,7 +1109,7 @@ class SimReflExperiment(object):
         return DataPoint(newx, new_meastime, mnum, (T, dT, L, dL, N[0], Nbkg[0], Ninc[0]), merit=maxfom)
 
     def select_new_point(self, step, start=0):
-        """Find a single new point to measure from the figure of merit
+        """ (Deprecated) Find a single new point to measure from the figure of merit
         
         Inputs:
         step -- the step to analyze. Assumes that step has foms (figures of merit) and
