@@ -858,7 +858,7 @@ class SimReflExperiment(object):
             xqprofs = newxqprofs
             pts = newpts
 
-            print(f'Forecast step {i} time: {time.time() - init_time}')
+            print(f'Forecast step {i}:\tNumber of curves: {newpts.shape[0]}\tCalculation time: {time.time() - init_time}')
             
         # reset instrument state
         self.instrument.x = org_x
