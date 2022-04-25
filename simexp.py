@@ -1178,7 +1178,8 @@ class SimReflExperimentControl(SimReflExperiment):
 
         self.meastimeweights = list()
         for x, weight in zip(self.x, model_weights):
-            self.meastimeweights.append(weight * np.array(x)**2 / np.sum(np.array(x)**2))
+            f = self.instrument.meastime(x, weight)
+            self.meastimeweights.append(f)
 
     def take_step(self, total_time):
         r"""Overrides SimReflExperiment.take_step
@@ -1418,7 +1419,7 @@ def snapshot(exp, stepnumber, fig=None, power=4, tscale='log'):
         idata = [[val for pt in plotpoints for val in getattr(pt, attr)] for attr in exp.attr_list]
         ar.plot_qprofiles(copy.copy(measQ), qprof, step.draw.logp, data=idata, ax=axtop, power=power)
         axtop.set_title(f'meas t = {steptimes[i]:0.0f} s\nmove t = {movetimes[i]:0.0f} s', fontsize='larger')
-        axbot.semilogy(x, fom, linewidth=3, color='C0')
+        axbot.plot(x, fom, linewidth=3, color='C0')
         if (j + 1) < len(exp.steps):
             newpoints = [pt for pt in exp.steps[j+1].points if ((pt.model == i) & (pt.merit is not None))]
             for newpt in newpoints:
