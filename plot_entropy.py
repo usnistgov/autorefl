@@ -123,6 +123,8 @@ def plot_entropy(tscale=None, min_time=None, control=None, experiments=[], label
     clegend_elements = []
     if labels is None:
         alllabels = [None for _ in range(len(experiments))]
+    else:
+        alllabels = labels
 
     if control is not None:
         explist = load_path(control)
