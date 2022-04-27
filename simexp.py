@@ -426,7 +426,7 @@ class SimReflExperiment(object):
         MPMapper.stop_mapper(mapper)
         MPMapper.pool = None
 
-    def take_step(self):
+    def take_step(self, allow_repeat=True):
         """Analyze the last fitted step and add the next one
         
         Procedure:
@@ -446,7 +446,7 @@ class SimReflExperiment(object):
         init_time = time.time()
         pts = step.draw.points[:, self.sel]
         qprofs = step.qprofs
-        foms, meastimes, Hs, newpoints = self._fom_from_draw(pts, qprofs, select_ci_level=0.68, meas_ci_level=self.eta, n_forecast=self.npoints)
+        foms, meastimes, Hs, newpoints = self._fom_from_draw(pts, qprofs, select_ci_level=0.68, meas_ci_level=self.eta, n_forecast=self.npoints, allow_repeat=allow_repeat)
         print('Total figure of merit calculation time: %f' % (time.time() - init_time))
 
         # populate step foms (TODO: current analysis code can't handle multiple foms, could pass all of them in here)
@@ -656,7 +656,7 @@ class SimReflExperiment(object):
 
         return foms, meas_times
 
-    def _fom_from_draw(self, pts, qprofs, select_ci_level=0.68, meas_ci_level=0.68, n_forecast=1):
+    def _fom_from_draw(self, pts, qprofs, select_ci_level=0.68, meas_ci_level=0.68, n_forecast=1, allow_repeat=True):
         """ Calculate figure of merit from a set of draw points and associated q profiles
         
             Inputs:
@@ -665,6 +665,7 @@ class SimReflExperiment(object):
             select_ci_level -- confidence interval level to use for selection (default 0.68)
             meas_ci_level -- confidence interval level to target for measurement (default 0.68, typically use self.eta)
             n_forecast -- number of forecast steps to take (default 1)
+            allow_repeat -- whether or not the same point can be measured twice in a row. Turn off to improve stability.
 
             Returns:
             all_foms -- list (one for each forecast step) of lists of figures of merit (one for each model)
@@ -815,6 +816,11 @@ class SimReflExperiment(object):
             # apply penalties
             scaled_foms = self._apply_fom_penalties(foms, curmodel=self.curmodel)
             scaled_foms = self._apply_time_penalties(scaled_foms, meas_times, curmodel=self.curmodel)
+
+            # remove current point from contention if allow_repeat is False
+            if (not allow_repeat) & (self.instrument.x is not None):
+                curidx = np.where(self.x[self.curmodel]==self.instrument.x)[0][0]
+                scaled_foms[self.curmodel][curidx] = 0.0
 
             # perform point selection
             top_n = self._find_fom_maxima(scaled_foms, start=0)
