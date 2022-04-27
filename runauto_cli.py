@@ -40,6 +40,10 @@ parser.add_argument('--init', type=str, default='lhs')
 parser.add_argument('--resume', type=str)
 parser.add_argument('--instrument', type=str, default='MAGIK')
 parser.add_argument('--oversampling', type=int, default=11)
+parser.add_argument('--qmin', type=float, default=0.008)
+parser.add_argument('--qmax', type=float, default=0.25)
+parser.add_argument('--qstep', type=float, default=0.0005)
+parser.add_argument('--qstep_max', type=float, default=None)
 args = parser.parse_args()
 
 # define fit options dictionary
@@ -82,20 +86,14 @@ if __name__ == '__main__':
         # condition selection array
         sel = np.array(args.sel) if args.sel is not None else None
 
+        # set measQ
+        qstep_max = args.qstep if args.qstep_max is None else args.qstep_max
+        dq = np.linspace(args.qstep, qstep_max, int(np.ceil(2 * (args.qmax - args.qmin) / (qstep_max + args.qstep))))
+        measQ = (args.qmin-args.qstep) + np.cumsum(dq)
+        #measQ = [m.fitness.probe.Q for m in model.models]
+
         # simulated experiment
         if not args.control:
-
-            # calculation vector
-            # TODO: figure out how to specify this in the cli
-            #measQ = np.linspace(0.008, 0.25, 201)
-            qstep = 0.0005
-            qstep_max = 0.0024
-            qmax = 0.25
-            qmin = 0.008
-            dq = np.linspace(qstep,qstep_max, int(np.ceil(2*(qmax-qmin)/(qstep_max+qstep))))
-            measQ = (qmin-qstep) + np.cumsum(dq)
-            #measQ = np.arange(0.008, 0.5005, 0.0005)
-#            measQ = [m.fitness.probe.Q for m in model.models]  
 
             for kk in range(args.nrepeats):
                 exp = SimReflExperiment(model, measQ, instrument=instr, eta=args.eta, fit_options=fit_options, oversampling=args.oversampling, bestpars=bestp, select_pars=sel, meas_bkg=meas_bkg, switch_penalty=args.penalty, npoints=args.npoints)
@@ -125,7 +123,7 @@ if __name__ == '__main__':
                     print('Rep: %i, Step: %i, Total time so far: %0.1f' % (kk, k, total_t))
                     exp.fit_step()
                     #exp.instrument.x = None # to turn off movement penalty
-                    exp.take_step()
+                    exp.take_step(allow_repeat=False)
                     exp.save(pathname + '/exp%i.pickle' % kk)
                     k += 1
 
@@ -138,17 +136,6 @@ if __name__ == '__main__':
 
         # control measurement
         else:
-            # calculation vector
-            if args.instrument == 'CANDOR':
-                qstep = 0.0005
-                qstep_max = 0.0024
-                qmax = 0.25
-                qmin = 0.008
-                dq = np.linspace(qstep,qstep_max, int(np.ceil(2*(qmax-qmin)/(qstep_max+qstep))))
-                measQ = (qmin-qstep) + np.cumsum(dq)
-            else:
-                measQ = [m.fitness.probe.Q for m in model.models]
-
             # meastimes
             meastimes = np.diff(np.insert(np.logspace(1, np.log10(args.maxtime), args.nctrlpts, endpoint=True), 0, 0))
 
@@ -164,7 +151,7 @@ if __name__ == '__main__':
                 if args.instrument == 'CANDOR':
                     for i, measQ in enumerate(exp.measQ):
                         x = list()
-                        overlap = 0.75
+                        overlap = 0.90
                         xrng = exp.instrument.qrange2xrange([min(measQ), max(measQ)])
                         x.append(xrng[0])
                         while x[-1] < xrng[1]:
