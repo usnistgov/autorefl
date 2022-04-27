@@ -6,6 +6,7 @@ import dill
 from bumps.fitters import DreamFit, ConsoleMonitor, _fill_defaults, StepMonitor
 from bumps.initpop import generate
 from bumps.mapper import MPMapper
+from bumps.dream.stats import credible_interval
 #from bumps.dream.state import load_state
 #from refl1d.names import FitProblem, Experiment
 from refl1d.resolution import TL2Q, dTdL2dQ
@@ -14,7 +15,8 @@ from matplotlib import cm, colors
 from matplotlib.gridspec import GridSpec
 #from bumps.mapper import can_pickle, SerialMapper
 from sklearn.linear_model import LinearRegression
-#from scipy.stats import poisson
+from scipy.stats import norm
+from scipy.interpolate import interp1d
 import autorefl as ar
 import instrument
 
@@ -172,7 +174,7 @@ class SimReflExperiment(object):
             exp.take_step()
     """
 
-    def __init__(self, problem, Q, instrument=instrument.MAGIK(), eta=0.8, npoints=1, switch_penalty=1, bestpars=None, fit_options=fit_options, oversampling=11, meas_bkg=1e-6, startmodel=0, min_meas_time=10, select_pars=None) -> None:
+    def __init__(self, problem, Q, instrument=instrument.MAGIK(), eta=0.68, npoints=1, switch_penalty=1, bestpars=None, fit_options=fit_options, oversampling=11, meas_bkg=1e-6, startmodel=0, min_meas_time=10, select_pars=None) -> None:
         # running list of options: oversampling, background x nmodels, minQ, maxQ, fit_options, startmodel, wavelength
         # more options: eta, npoints, (nrepeats not necessary because multiple objects can be made and run), switch_penalty, min_meas_time
         # problem is the FitProblem object to simulate
@@ -404,7 +406,7 @@ class SimReflExperiment(object):
 
         step = self.steps[-1]
         step.chain_pop = chains[-1, :, :]
-        step.draw = fitter.state.draw(thin=int(self.fit_options['steps']*0.2))
+        step.draw = fitter.state.draw(thin=int(self.fit_options['steps']*0.05))
         step.best_logp = fitter.state.best()[1]
         self.problem.setp(fitter.state.best()[0])
         step.final_chisq = self.problem.chisq_str()
@@ -424,64 +426,50 @@ class SimReflExperiment(object):
         MPMapper.stop_mapper(mapper)
         MPMapper.pool = None
 
-    def take_step(self):
+    def take_step(self, allow_repeat=True):
         """Analyze the last fitted step and add the next one
         
         Procedure:
             1. Calculate the figures of merit
-            2. Apply penalties to the figures of merit
-            TODO: apply penalties as a separate "cost function"
-            3. Identify and produce the next self.npoints data points
+            2. Identify the next self.npoints data points
                 to simulate/measure
+            (1 and 2 are currently done in _fom_from_draw)
+            3. Simulate the new data points
             4. Add a new step for fitting.
         """
 
         # Focus on the last step
         step = self.steps[-1]
         
-        # Calculate figures of merit and proposed measurement times
-        step.foms, step.meastimes = self.calc_foms(step)
+        # Calculate figures of merit and proposed measurement times with forecasting
+        print('Calculating figures of merit:')
+        init_time = time.time()
+        pts = step.draw.points[:, self.sel]
+        qprofs = step.qprofs
+        foms, meastimes, Hs, newpoints = self._fom_from_draw(pts, qprofs, select_ci_level=0.68, meas_ci_level=self.eta, n_forecast=self.npoints, allow_repeat=allow_repeat)
+        print('Total figure of merit calculation time: %f' % (time.time() - init_time))
 
-        # Apply the minimum measurement time
-        # TODO: Consider whether the minimum measurement time should be tied to the movement time?
-        min_meas_times = [np.maximum(np.full_like(meastime, self.min_meas_time), meastime) for meastime in step.meastimes]
+        # populate step foms (TODO: current analysis code can't handle multiple foms, could pass all of them in here)
+        step.foms, step.meastimes = foms[0], meastimes[0]
 
+        # Determine next measurement point(s).
+        # Number of points to be used is determined from n_forecast (self.npoints)
+        # NOTE: At some point this could be turned into an asynchronous "point queue"; in this case the following loop will have to be
+        #       over self.npoints
         points = []
-        
-        # Apply penalties to the figure of merit and find the optimal next point
-        for i in range(self.npoints):
-            # calculate movement time penalty (and time penalty to switch models if applicable)
-            switch_time_penalty = [0.0 if j == self.curmodel else self.switch_time_penalty for j in range(self.nmodels)]
-            movepenalty = [meastime / (meastime + self.instrument.movetime(x) + pen) for x, meastime, pen in zip(self.x, min_meas_times, switch_time_penalty)]
+        for pt, fom in zip(newpoints, foms):
+            mnum, idx, newx, new_meastime = pt
+            newpoint = self._generate_new_point(mnum, newx, new_meastime, fom[mnum][idx])
+            newpoint.movet = self.instrument.movetime(newpoint.x)[0]
+            points.append(newpoint)
+            print('New data point:\t' + repr(newpoint))
 
-            # all models incur switch penalty except the current one
-            spenalty = [1.0 if j == self.curmodel else self.switch_penalty for j in range(self.nmodels)]
-            step.scaled_foms = [fom * movepen / pen for fom, pen, movepen in zip(step.foms, spenalty, movepenalty)]
+            # Once a new point is added, update the current model so model switching
+            # penalties can be reapplied correctly
+            self.curmodel = newpoint.model
 
-            if False:
-                for fom, scaled_fom, x in zip(step.foms, step.scaled_foms, self.x):
-                    p = plt.semilogy(x, fom, '--')
-                    plt.semilogy(x, scaled_fom, '-', color=p[0].get_color())
-                
-                plt.show()
-
-            newpoint = self.select_new_point(step, start=i)
-
-            # newpoint can be None if not enough maxima in the fom are found. In this case
-            # stop looking for new points
-            if newpoint is not None:
-                newpoint.movet = self.instrument.movetime(newpoint.x)[0]
-                points.append(newpoint)
-                print('New data point:\t' + repr(newpoint))
-
-                # Once a new point is added, update the current model so model switching
-                # penalties can be reapplied correctly
-                self.curmodel = newpoint.model
-
-                # "move" instrument to new location for calculating the next movement penalty
-                self.instrument.x = newpoint.x
-            else:
-                break
+            # "move" instrument to new location for calculating the next movement penalty
+            self.instrument.x = newpoint.x
         
         self.add_step(points)
 
@@ -489,9 +477,46 @@ class SimReflExperiment(object):
         # Adds a set of DataPoint objects as a new ExperimentStep
         self.steps.append(ExperimentStep(points, use=use))
 
+    def _apply_fom_penalties(self, foms, curmodel=None):
+        # Applies any penalties that scale the figures of merit directly
+        if curmodel is None:
+            curmodel = self.curmodel
+
+        # Calculate switching penalty
+        spenalty = [1.0 if j == curmodel else self.switch_penalty for j in range(self.nmodels)]
+
+        # Perform scaling
+        scaled_foms = [fom  / pen for fom, pen in zip(foms, spenalty)]
+
+        return scaled_foms
+
+    def _apply_time_penalties(self, foms, meastimes, curmodel=None):
+        # Applies any penalties that act to increase the measurement time, e.g. movement penalties or model switch time penalities
+        # NOTE: uses current state of the instrument (self.instrument.x).
+        if curmodel is None:
+            curmodel = self.curmodel
+
+        # Apply minimum to proposed measurement times
+        min_meas_times = [np.maximum(np.full_like(meastime, self.min_meas_time), meastime) for meastime in meastimes]
+
+        # Calculate time penalty to switch models
+        switch_time_penalty = [0.0 if j == curmodel else self.switch_time_penalty for j in range(self.nmodels)]
+
+        # Add all movement time penalties together.
+        movepenalty = [meastime / (meastime + self.instrument.movetime(x) + pen) for x, meastime, pen in zip(self.x, min_meas_times, switch_time_penalty)]
+
+        # Perform scaling
+        scaled_foms = [fom * movepen for fom,movepen in zip(foms, movepenalty)]
+
+        return scaled_foms
+
+
     def _marginalization_efficiency(self, Qth, qprof, points):
         """ Calculate the marginalization efficiency: the fraction of uncertainty in R(Q) that
-            arises from the marginal parameters"""
+            arises from the marginal parameters.
+            
+            Used by calc_foms_cov
+            """
 
         # define parameter numbers to select
         marg_points = points[:,self.sel]
@@ -526,8 +551,29 @@ class SimReflExperiment(object):
 
         return df2s, df2s_marg, df2s_marg / df2s
 
-    def calc_foms(self, step):
+    def _smoothed_dR(self):
+        """ Estimate local dR by smoothing over neighboring points. Smoothing is done using a Gaussian kernel with width dQ.
+            Does NOT update dR from current data points.
+        
+        Returns:
+            all_smoothed_dR -- list of arrays with smoothed dR, one for each model. Each array is the same shape as dR.
+        
+        """
+
+        all_smoothed_dR = list()
+        for m in self.models:
+            Q, dR = m.fitness.probe.Q, m.fitness.probe.dR
+            smoothed_dR = list()
+            for Qi, dQi in zip(Q, m.fitness.probe.dQ):
+                kernel = 1./(2*np.pi*dQi**2) * np.exp(-(Q - Qi) ** 2 / (2 * dQi **2))
+                smoothed_dR.append(np.sum(dR * kernel / dR ** 2) / np.sum(kernel / dR ** 2))
+            all_smoothed_dR.append(np.array(smoothed_dR))
+
+        return all_smoothed_dR
+
+    def calc_foms_cov(self, step):
         """Calculate figures of merit for each model, using a Jacobian/covariance matrix approach
+            Deprecated in favor of dHdt forecasting models
 
         Inputs:
         step -- the step to analyze. Assumes that the step has been fit so
@@ -540,8 +586,9 @@ class SimReflExperiment(object):
 
         foms = list()
         meas_times = list()
+        
         # Cycle through models, with model-specific x, Q, calculated q profiles, and measurement background level
-        for mnum, (m, xs, Qth, qprof, qbkg) in enumerate(zip(self.models, self.x, self.measQ, step.qprofs, self.meas_bkg)):
+        for mnum, (m, xs, Qth, qprof, qbkg, sdR) in enumerate(zip(self.models, self.x, self.measQ, step.qprofs, self.meas_bkg, self._smoothed_dR())):
 
             # get the incident intensity for all x values
             incident_neutrons = self.instrument.intensity(xs)
@@ -554,15 +601,9 @@ class SimReflExperiment(object):
 
             # q-dependent noise. Use the minimum of the actual spread in Q and the expected spread from the nearest points. 
             # This can get stuck if the spread changes too rapidly, so dR is smoothed by dQ.
-            smoothed_dR = list()
-            Q, dR = m.fitness.probe.Q, m.fitness.probe.dR
-            for Qi, dQi in zip(Q, m.fitness.probe.dQ):
-                kernel = 1./(2*np.pi*dQi**2) * np.exp(-(Q - Qi) ** 2 / (2 * dQi **2))
-                smoothed_dR.append(np.sum(dR * kernel / dR ** 2) / np.sum(kernel / dR ** 2))
-
             # TODO: Is this really the right thing to do? Should probably just be the actual spread; the problem is that if
             # the spread doesn't constrain the variables very much, then we just keep measuring at the same point over and over.
-            minstd = np.min(np.vstack((np.std(qprof, axis=0), np.interp(Qth, m.fitness.probe.Q, smoothed_dR))), axis=0)
+            minstd = np.min(np.vstack((np.std(qprof, axis=0), np.interp(Qth, m.fitness.probe.Q, sdR))), axis=0)
             normrefl = refl * (minstd/np.mean(qprof, axis=0))**4
 
             # Calculate marginalization efficiency
@@ -615,20 +656,401 @@ class SimReflExperiment(object):
 
         return foms, meas_times
 
-    def select_new_point(self, step, start=0):
-        """Find a single new point to measure from the figure of merit
+    def _fom_from_draw(self, pts, qprofs, select_ci_level=0.68, meas_ci_level=0.68, n_forecast=1, allow_repeat=True):
+        """ Calculate figure of merit from a set of draw points and associated q profiles
         
-        Inputs:
-        step -- the step to analyze. Assumes that step has foms (figures of merit) and
-                measurement times precalculated
-        start -- index of figure of merit maxima to begin searching. Allows multiple points
-                to be identified by calling select_new_point sequentially, incrementing "start"
+            Inputs:
+            pts -- draw points. Should be already selected for marginalized paramters
+            qprofs -- list of q profiles, one for each model of size <number of samples in pts> x <number of measQ values>
+            select_ci_level -- confidence interval level to use for selection (default 0.68)
+            meas_ci_level -- confidence interval level to target for measurement (default 0.68, typically use self.eta)
+            n_forecast -- number of forecast steps to take (default 1)
+            allow_repeat -- whether or not the same point can be measured twice in a row. Turn off to improve stability.
 
-        Returns:
-        a DataPoint object containing the new point with simulated data
+            Returns:
+            all_foms -- list (one for each forecast step) of lists of figures of merit (one for each model)
+            all_meastimes -- list (one for each forecast step) of lists of proposed measurement times (one for each model)
+            all_H0 -- list (one for each forecast step) of maximum entropy (not entropy change) before that step
+            all_new -- list of forecasted optimal data points (one for each forecast step). Each element in the list is a list
+                        of properties of the new point with format: [<model number>, <x index>, <x value>, <measurement time>])
         """
 
-        # TODO: Implement a more random algorithm. One idea is to define a partition function
+        """shape definitions:
+            X -- number of x values in xs
+            D -- number of detectors
+            N -- number of samples
+            P -- number of marginalized paramters"""
+
+        # Cycle through models, with model-specific x, Q, calculated q profiles, and measurement background level
+        # Populate q vectors, interpolated q profiles (slow), and intensities
+        intensities = list()
+        intens_shapes = list()
+        qs = list()
+        xqprofs = list()
+        init_time = time.time()
+        for xs, Qth, qprof, qbkg in zip(self.x, self.measQ, qprofs, self.meas_bkg):
+
+            # get the incident intensity and q values for all x values (should have same shape X x D).
+            # flattened dimension is XD
+            incident_neutrons = self.instrument.intensity(xs)
+            init_shape = incident_neutrons.shape
+            incident_neutrons = incident_neutrons.flatten()
+            q = self.instrument.x2q(xs).flatten()
+
+            # define signal to background. For now, this is just a scaling factor on the effective rate
+            # reference: Hoogerheide et al. J Appl. Cryst. 2022
+            sbr = qprof / qbkg
+            refl = qprof/(1+2/sbr)
+            refl = np.clip(refl, a_min=0, a_max=None)
+
+            # perform interpolation. xqprof should have shape N x XD. This is a slow step (and should only be done once)
+            interp_refl = interp1d(Qth, refl, axis=1, fill_value=(refl[:,0], refl[:,-1]), bounds_error=False)
+            xqprof = np.array(interp_refl(q))
+
+            intensities.append(incident_neutrons)
+            intens_shapes.append(init_shape)
+            qs.append(q)
+            xqprofs.append(xqprof)
+
+        print(f'Forecast setup time: {time.time() - init_time}')
+
+        all_foms = list()
+        all_meas_times = list()
+        all_H0 = list()
+        all_new = list()
+        org_curmodel = self.curmodel
+        org_x = self.instrument.x
+
+        """For each stage of the forecast, go through:
+            1. Calculate the foms
+            2. Select the new points
+            3. Repeat
+        """
+        for i in range(n_forecast):
+            init_time = time.time()
+            Hlist = list()
+            foms = list()
+            meas_times = list()
+            #newidxs_select = list()
+            newidxs_meas = list()
+            newxqprofs = list()
+            N, P = pts.shape
+            minci_sel, maxci_sel =  int(np.floor(N * (1 - select_ci_level) / 2)), int(np.ceil(N * (1 + select_ci_level) / 2))
+            minci_meas, maxci_meas =  int(np.floor(N * (1 - meas_ci_level) / 2)), int(np.ceil(N * (1 + meas_ci_level) / 2))
+            H0 = ar.calc_entropy(pts)   # already marginalized!!
+            all_H0.append(H0)
+            # cycle though models
+            for incident_neutrons, init_shape, q, xqprof in zip(intensities, intens_shapes, qs, xqprofs):
+
+                #init_time2a = time.time()
+                # TODO: Shouldn't these already be sorted by the second step?
+                idxs = np.argsort(xqprof, axis=0)
+                #print(f'Sort time: {time.time() - init_time2a}')
+                #print(idxs.shape)
+
+                # Select new points and indices in CI. Now has dimension M x XD X P
+                A = np.take_along_axis(pts[:, None, :], idxs[:, :, None], axis=0)[minci_sel:maxci_sel]
+                
+                #init_time2a = time.time()
+                # calculate new index arrays and xqprof values
+                # this also works: meas_sigma = 0.5*np.diff(np.take_along_axis(xqprof, idxs[[minci, maxci],:], axis=0), axis=0)
+                newidx = idxs[minci_meas:maxci_meas]
+                meas_xqprof = np.take_along_axis(xqprof, newidx, axis=0)#[minci:maxci]
+                meas_sigma = 0.5 * (np.max(meas_xqprof, axis=0) - np.min(meas_xqprof, axis=0))
+                sel_xqprof = np.take_along_axis(xqprof, idxs[minci_sel:maxci_sel], axis=0)#[minci:maxci]
+                sel_sigma = 0.5 * (np.max(sel_xqprof, axis=0) - np.min(sel_xqprof, axis=0))
+
+                #print(f'Sel calc time: {time.time() - init_time2a}')
+                
+                #sel_sigma = 0.5 * np.diff(np.take_along_axis(xqprof, idxs[[minci_sel, maxci_sel],:], axis=0), axis=0)
+                #meas_sigma = 0.5 * np.diff(np.take_along_axis(xqprof, idxs[[minci_meas, maxci_meas],:], axis=0), axis=0)
+
+                init_time2 = time.time()
+                # Condition shape (now has dimension XD X P X M)
+                A = np.moveaxis(A, 0, -1)
+                A = A - np.mean(A, axis=-1, keepdims=True)
+                A_T = np.swapaxes(A, -1, -2)
+
+                # Calculate covariance matrix (shape XD X P X P)
+                covs = np.einsum('ikl,ilm->ikm', A, A_T, optimize='greedy') / (A.shape[-1] - 1)
+
+                # Alternate approach (slower for small arrays, faster for very large arrays)
+                #covs = list()
+                #for a in A:
+                #    covs.append(np.cov(a))
+
+                #print(f'Cov time: {time.time() - init_time2}')
+                
+                # Calculate determinant (shape XD)
+                _, dets = np.linalg.slogdet(covs)
+                Hs = 0.5 * P * (np.log(2 * np.pi) + 1) + dets
+
+                # Calculate measurement times (shape XD)
+                med = np.median(xqprof, axis=0)
+                xrefl_sel = (incident_neutrons * med * (sel_sigma / med) ** 2)
+                xrefl_meas = (incident_neutrons * med * (meas_sigma / med) ** 2)
+                meastime_sel = 1.0 / xrefl_sel
+                meastime_meas = 1.0 / xrefl_meas
+
+                # apply min measurement time (turn this off initially to test operation)
+                #meastime = np.maximum(np.full_like(meastime, self.min_meas_time), meastime)
+
+                # figure of merit is dHdt (reshaped to X x D)
+                dHdt = (H0 - Hs) / meastime_sel
+                dHdt = np.reshape(dHdt, init_shape)
+
+                # calculate fom and average time (shape X)
+                fom = np.sum(dHdt, axis=1)
+                meas_time = 1./ np.sum(1./np.reshape(meastime_meas, init_shape), axis=1)
+
+                Hlist.append(Hs)
+                foms.append(fom)
+                meas_times.append(meas_time)
+                newxqprofs.append(meas_xqprof)
+                newidxs_meas.append(newidx)
+                
+            # populate higher-level lists
+            all_foms.append(foms)
+            all_meas_times.append(meas_times)
+
+            # apply penalties
+            scaled_foms = self._apply_fom_penalties(foms, curmodel=self.curmodel)
+            scaled_foms = self._apply_time_penalties(scaled_foms, meas_times, curmodel=self.curmodel)
+
+            # remove current point from contention if allow_repeat is False
+            if (not allow_repeat) & (self.instrument.x is not None):
+                curidx = np.where(self.x[self.curmodel]==self.instrument.x)[0][0]
+                scaled_foms[self.curmodel][curidx] = 0.0
+
+            # perform point selection
+            top_n = self._find_fom_maxima(scaled_foms, start=0)
+            #print(top_n)
+            if top_n is not None:
+                _, mnum, idx = top_n
+                newx = self.x[mnum][idx]
+                new_meastime = max(meas_times[mnum][idx], self.min_meas_time)
+                
+                all_new.append([mnum, idx, newx, new_meastime])
+            else:
+                break
+
+            # apply point selection
+            self.instrument.x = newx
+            self.curmodel = mnum
+
+            # choose new points. This is not straightforward if there is more than one detector, because
+            # each point in XD may choose a different detector. We will choose without replacement by frequency.
+            # idx_array has shape M x D
+            idx_array = newidxs_meas[mnum].reshape(-1, *intens_shapes[mnum])[:, idx, :]
+            #print(idx_array.shape)
+            if idx_array.shape[1] == 1:
+                # straightforward case, with 1 detector
+                chosen = np.squeeze(idx_array)
+            else:
+                # select those that appear most frequently
+                #print(idx_array.shape)
+                freq = np.bincount(idx_array.flatten(), minlength=len(pts))
+                freqsort = np.argsort(freq)
+                chosen = freqsort[-idx_array.shape[0]:]
+                
+            newpts = pts[chosen]
+            newxqprofs = [xqprof[chosen] for xqprof in xqprofs]
+
+            # set up next iteration
+            xqprofs = newxqprofs
+            pts = newpts
+
+            print(f'Forecast step {i}:\tNumber of samples: {N}\tCalculation time: {time.time() - init_time}')
+
+        # reset instrument state
+        self.instrument.x = org_x
+        self.curmodel = org_curmodel
+
+        return all_foms, all_meas_times, all_H0, all_new
+
+    def _dHdt(self, pts, qprofs, incident_neutrons, dR, resample=0, ci_level=0.68):
+        """ Calculate rate of change of entropy (dH/dt) for measuring at a given Q point
+            Deprecated in favor of _fom_from_draw, which uses numpy operations for speed.
+        
+        Inputs:
+        pts -- the parameter samples underlying each Q profile (nprof x npar array)
+        qprofs -- Q profiles (nprof x len(self.measQ[modelnum]) array)
+        incident_neutrons -- intensity (nQpoints array)
+        dR -- local estimate of data dR (nQpoints array) (not currently used)
+        resample -- attempt to find best point by resampling Q profiles and averaging entropy decrease.
+                    defaults to 0 (resampling off); use a nonzero integer for number of resamples (should
+                    be at least 10 but becomes computationally expensive as it grows)
+        ci_level -- confidence level at which to do the dH/dt calculation (not the measurement time calculation)
+        
+        Returns:
+        dHdt -- array of dH/dt values for each Q point in qprofs
+        ts -- array of measurement time values for each Q point in qprofs
+        """
+
+        eta = self.eta  # measure to specified level
+        zvalue = norm.interval(ci_level, loc=0, scale=1.0)[1]
+        #for _ in range(n_steps):
+        dH = list()
+        dHdt = list()
+        ddHdt = list()
+        ts = list()
+        goodidxs = list()
+        H0 = ar.calc_entropy(pts, select_pars=self.sel)
+
+        # initialize random number generator
+        rng = np.random.default_rng()
+
+        # cycle through all q values)
+        for idx, (intens, idR) in enumerate(zip(incident_neutrons, dR)):
+            
+            # extract distribution of q profiles
+            iqs = qprofs[:,idx]
+            iqs_sorted = np.sort(iqs)
+            
+            # calculate median and (eta x 100) CI
+            med, ci, ci1 = credible_interval(iqs_sorted, (0, eta, ci_level))
+            med = med[0]
+            eff_sigma = 0.5 * np.diff(ci1)[0]
+
+            # check that spread in sampled q profiles isn't significantly greater than spread in data 
+            if False: #eff_sigma > idR * zvalue:
+                # effective eta = 0.68 in this branch
+                meas_sigma = idR * zvalue
+            else:
+                meas_sigma = 0.5 * np.diff(ci)[0]
+
+            # estimate neutron flux (intens x med) and existing uncertainty
+            xrefl_meas = (intens * med * (meas_sigma / med) ** 2)
+            xrefl_select = (intens * med * (eff_sigma / med) ** 2)
+
+            # estimate measurement time to equal standard deviation of a gaussian with this CI
+            #meastime = (1-eta) / (eta**2 * xrefl)
+            meastime = 1.0 / xrefl_meas
+            selecttime = 1.0 / xrefl_select
+
+            if resample == 0:
+                # if not resampling, just take all curves in the specified confidence interval
+                crit = (iqs > ci1[0]) & (iqs < ci1[1])
+                r1idxs = np.arange(len(crit))[crit]
+                if False:
+                    iHs = list()
+                    for _ in range(100):
+                        iidx = rng.choice(r1idxs, size=int(len(r1idxs)), replace=True)
+                        iHs.append(ar.calc_entropy(pts[iidx, :], select_pars=self.sel))
+                    iH = np.mean(iHs)
+                    diH = np.std(iHs)
+                else:
+                    iH = ar.calc_entropy(pts[r1idxs, :], select_pars=self.sel)
+                    diH = 0.0
+
+            else:
+                # calculate probability density of new distribution
+                p = (2 * np.pi * meas_sigma ** 2) ** -0.5 * np.exp(-(iqs_sorted - med) ** 2 / (2 * meas_sigma ** 2))
+
+                # perform resampling
+                iHs = list()
+                for _ in range(int(resample)):
+                    # resample original curves
+                    r1idxs = rng.choice(np.arange(len(iqs_sorted)), size=len(iqs_sorted), p=p/np.sum(p))
+                    r1idxs = np.unique(r1idxs)
+                    
+                    # select corresponding parameter values
+                    newpts = pts[r1idxs, :]
+
+                    # calculate marginalized entropy of selected points
+                    iH = ar.calc_entropy(newpts, select_pars=self.sel)
+
+                    iHs.append(iH)
+                iH = np.mean(iHs)
+                diH = np.std(iHs)
+
+            # calculate differential entropy from initial state
+            dH.append(H0 - iH)
+            dHdt.append((H0 - iH) / selecttime)
+            ddHdt.append(diH / selecttime)
+            ts.append(meastime)
+            goodidxs.append(r1idxs)
+        
+        # selection (vestigial if n_steps == 1, used if doing multiple forecasting)
+        #maxidx = np.where(dHdt==np.max(dHdt))[0][0]
+        #goodidx = goodidxs[maxidx]
+        #pts = pts[goodidx,:]
+        #qprofs = qprofs[goodidx,:]
+
+        return np.array(dHdt), np.array(ddHdt), np.array(ts)
+
+    def calc_foms(self, step):
+        """Calculate figures of merit for each model, using sampled R(Q) to predict maximum deltaH in time
+            (Note: deprecated in favor of forecasting models)
+
+        Inputs:
+        step -- the step to analyze. Assumes that the step has been fit so
+                step.draw and step.qprofs exist
+
+        Returns:
+        foms -- list of figures of merit (ndarrays), one for each model in self.problem
+        meastimes -- list of suggested measurement times at each Q value, one for each model
+        """
+
+        foms = list()
+        meas_times = list()
+        pts = step.draw.points
+        # Cycle through models, with model-specific x, Q, calculated q profiles, and measurement background level
+        for mnum, (m, xs, Qth, qprof, qbkg, sdR) in enumerate(zip(self.models, self.x, self.measQ, step.qprofs, self.meas_bkg, self._smoothed_dR())):
+
+            # get the incident intensity for all x values
+            incident_neutrons = self.instrument.intensity(xs)
+
+            # define signal to background. For now, this is just a scaling factor on the effective rate
+            # reference: Hoogerheide et al. J Appl. Cryst. 2022
+            sbr = qprof / qbkg
+            refl = qprof/(1+2/sbr)
+            refl = np.clip(refl, a_min=0, a_max=None)
+
+            interp_refl = interp1d(Qth, refl, axis=1, fill_value=(refl[:,0], refl[:,-1]), bounds_error=False)
+            interp_refl_std = interp1d(m.fitness.probe.Q, sdR, fill_value=(sdR[0], sdR[-1]), bounds_error=False)
+            
+
+            # Calculate figures of merit and proposed measurement times
+            fom = list()
+            meas_time = list()
+            for x, intens in zip(xs, incident_neutrons):
+                q = np.squeeze(self.instrument.x2q(x))
+                #xrefl = intens * np.interp(q, Qth, refl * (minstd/np.mean(qprof, axis=0))**2)
+                # TODO: check this. Should it be the average of xrefl, or the sum?
+                #old_meas_time.append(np.mean((1-self.eta) / (self.eta**2 * xrefl)))
+                
+                # calculate the figure of merit
+                xqprof = np.array(interp_refl(q))
+                if xqprof.ndim == 1:
+                    xqprof = xqprof[:,None]
+                
+                xrefl_std = np.array(interp_refl_std(q), ndmin=1)
+                
+                idHdt, iddHdt, its = self._dHdt(pts, xqprof, intens, xrefl_std)
+                fom.append(np.sum(idHdt - iddHdt))
+                meas_time.append(1./np.sum(1./its))
+
+            foms.append(np.array(fom))
+            meas_times.append(np.array(meas_time))
+
+        return foms, meas_times
+
+    def _find_fom_maxima(self, scaled_foms, start=0):
+        """Finds all maxima in the figure of merit, including the end points
+        
+            Inputs:
+            scaled_foms -- figures of merit. They don't have to be scaled, but it should be the "final"
+                            FOM with any penalties already applied
+            start -- index of the first peak to select. Defaults to zero (start with the highest).
+
+            Returns:
+            top_n -- sorted list 
+
+        """
+
+        # TODO: Implement a more random algorithm (probably best appplied in a different function 
+        #       to the maxima themselves). One idea is to define a partition function
         #       Z = np.exp(fom / np.mean(fom)) - 1. The fom is then related to ln(Z(x)). Points are chosen
         #       using np.random.choice(x, size=self.npoints, p=Z/np.sum(Z)).
         #       I think that penalties will have to be applied differently, potentially directly to Z.
@@ -640,7 +1062,7 @@ class SimReflExperiment(object):
 
         # find maximum figures of merit in each model
 
-        for fom, Qth in zip(step.scaled_foms, self.measQ):
+        for fom, Qth in zip(scaled_foms, self.measQ):
             
             # a. calculate whether gradient is > 0
             dfom = np.sign(np.diff(np.append(np.insert(fom, 0, 0),0))) < 0
@@ -657,6 +1079,56 @@ class SimReflExperiment(object):
         # select top point
         top_n = sorted(maxidxs_m, reverse=True)[start:min(start+1, len(maxidxs_m))][0]
 
+        # returns sorted list of lists, each with entries [max fom value, model number, measQ index]
+        return top_n
+
+    def _generate_new_point(self, mnum, newx, new_meastime, maxfom=None):
+        """ Generates a new data point with simulated data from the specified x
+            position, model number, and measurement time
+            
+            Inputs:
+            mnum -- the model number of the new point
+            newx -- the x position of the new point
+            new_meastime -- the measurement time
+            maxfom -- the maximum of the figure of merit. Only used for record-keeping
+        """
+        
+        T = self.instrument.T(newx)[0]
+        dT = self.instrument.dT(newx)[0]
+        L = self.instrument.L(newx)[0]
+        dL = self.instrument.dL(newx)[0]
+
+        # for simulating data, need to subtract theta_offset from calculation models
+        # not all probes have theta_offset, however
+        # for now this is turned off. 
+        if False:
+            try:
+                to_calc = self.calcmodels[mnum].fitness.probe.theta_offset.value
+            except AttributeError:
+                to_calc = 0.0
+
+        calcR = ar.calc_expected_R(self.calcmodels[mnum].fitness, T, dT, L, dL, oversampling=self.oversampling, resolution='normal')
+        #print('expected R:', calcR)
+        incident_neutrons = self.instrument.intensity(newx) * new_meastime
+        N, Nbkg, Ninc = ar.sim_data_N(calcR, incident_neutrons, resid_bkg=self.resid_bkg[mnum], meas_bkg=self.meas_bkg[mnum])
+        
+        return DataPoint(newx, new_meastime, mnum, (T, dT, L, dL, N[0], Nbkg[0], Ninc[0]), merit=maxfom)
+
+    def select_new_point(self, step, start=0):
+        """ (Deprecated) Find a single new point to measure from the figure of merit
+        
+        Inputs:
+        step -- the step to analyze. Assumes that step has foms (figures of merit) and
+                measurement times precalculated
+        start -- index of figure of merit maxima to begin searching. Allows multiple points
+                to be identified by calling select_new_point sequentially, incrementing "start"
+
+        Returns:
+        a DataPoint object containing the new point with simulated data
+        """
+
+        top_n = self._find_fom_maxima(step.scaled_foms, start=start)
+
         if len(top_n):
             # generate a DataPoint object with the maximum point
             _, mnum, idx = top_n
@@ -664,20 +1136,8 @@ class SimReflExperiment(object):
             newx = self.x[mnum][idx]
             new_meastime = max(step.meastimes[mnum][idx], self.min_meas_time)
 
-            T = self.instrument.T(newx)[0]
-            dT = self.instrument.dT(newx)[0]
-            L = self.instrument.L(newx)[0]
-            dL = self.instrument.dL(newx)[0]
-            #print(T, dT, L, dL)
-            calcR = ar.calc_expected_R(self.calcmodels[mnum].fitness, T, dT, L, dL, oversampling=self.oversampling, resolution='normal')
-            #print('expected R:', calcR)
-            incident_neutrons = self.instrument.intensity(newx) * new_meastime
-            N, Nbkg, Ninc = ar.sim_data_N(calcR, incident_neutrons, resid_bkg=self.resid_bkg[mnum], meas_bkg=self.meas_bkg[mnum])
-            
-            t = max(self.min_meas_time, new_meastime)
+            return self._generate_new_point(mnum, newx, new_meastime, maxfom=maxfom)
 
-            return DataPoint(newx, t, mnum, (T, dT, L, dL, N[0], Nbkg[0], Ninc[0]), merit=maxfom)
-        
         else:
 
             return None
@@ -724,7 +1184,8 @@ class SimReflExperimentControl(SimReflExperiment):
 
         self.meastimeweights = list()
         for x, weight in zip(self.x, model_weights):
-            self.meastimeweights.append(weight * np.array(x)**2 / np.sum(np.array(x)**2))
+            f = self.instrument.meastime(x, weight)
+            self.meastimeweights.append(f)
 
     def take_step(self, total_time):
         r"""Overrides SimReflExperiment.take_step
@@ -964,7 +1425,7 @@ def snapshot(exp, stepnumber, fig=None, power=4, tscale='log'):
         idata = [[val for pt in plotpoints for val in getattr(pt, attr)] for attr in exp.attr_list]
         ar.plot_qprofiles(copy.copy(measQ), qprof, step.draw.logp, data=idata, ax=axtop, power=power)
         axtop.set_title(f'meas t = {steptimes[i]:0.0f} s\nmove t = {movetimes[i]:0.0f} s', fontsize='larger')
-        axbot.semilogy(x, fom, linewidth=3, color='C0')
+        axbot.plot(x, fom, linewidth=3, color='C0')
         if (j + 1) < len(exp.steps):
             newpoints = [pt for pt in exp.steps[j+1].points if ((pt.model == i) & (pt.merit is not None))]
             for newpt in newpoints:

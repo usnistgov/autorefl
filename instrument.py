@@ -40,6 +40,12 @@ class ReflectometerBase(object):
     def intensity(self, x):
         pass
 
+    def meastime(self, x, totaltime):
+
+        f = np.array(x) ** 2
+
+        return totaltime * f / sum(f)
+
     def T(self, x):
         
         return self.x2a(x)
@@ -155,6 +161,12 @@ class MAGIK(ReflectometerBase):
     
         return np.array(incident_neutrons, ndmin=2).T
 
+    def meastime(self, x, totaltime):
+
+        f = 30.0 + 1250. * np.array(x) ** 2
+
+        return totaltime * f / sum(f)
+
     def T(self, x):
 
         x = np.array(x, ndmin=1)
@@ -216,7 +228,7 @@ class CANDOR(ReflectometerBase):
         #ps1 = np.polynomial.polynomial.polyfit(s1, intens, 1)
 
     def x2q(self, x):
-        return a2q(x, self.L(x))
+        return a2q(self.T(x), self.L(x))
 
     def x2a(self, x):
         return x
@@ -233,6 +245,12 @@ class CANDOR(ReflectometerBase):
         incident_neutrons = [np.interp(news1, self.s1_intens_calib, intens) for intens in self.intens_calib.T]
     
         return np.array(incident_neutrons, ndmin=2).T
+
+    def meastime(self, x, totaltime):
+
+        f = 20.0 + 20000. * np.array(x) ** 3
+
+        return totaltime * f / sum(f)
 
     def get_slits(self, x):
         s1, s2, s3, _ = super().get_slits(x)
