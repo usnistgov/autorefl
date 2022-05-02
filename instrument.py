@@ -28,6 +28,11 @@ class ReflectometerBase(object):
         self._S3Offset = 0.0
         self._R12 = 1.0
 
+        # default t(Q) scaling parameters. Here t(Q) \propto _mon0 + _mon1 * Q^Qpow
+        self._mon0 = 0.0
+        self._mon1 = 1.0
+        self._Qpow = 2.0
+
     def x2q(self, x):
         pass
 
@@ -42,7 +47,9 @@ class ReflectometerBase(object):
 
     def meastime(self, x, totaltime):
 
-        f = np.array(x) ** 2
+        q = self.x2q(np.array(x))
+
+        f = self._mon0 + self._mon1 * q ** self._Qpow
 
         return totaltime * f / sum(f)
 
@@ -137,6 +144,11 @@ class MAGIK(ReflectometerBase):
         self._R12 = 1.0
         self.sample_width = np.inf
 
+        # best practice Q scaling
+        self._mon0 = 30.0
+        self._mon1 = 1250.
+        self._Qpow = 2.0
+
         # load calibration files
         try:
             d_intens = np.loadtxt('calibration/magik_intensity_hw106.refl')
@@ -160,12 +172,6 @@ class MAGIK(ReflectometerBase):
         incident_neutrons = np.polyval(self.p_intens, news1)
     
         return np.array(incident_neutrons, ndmin=2).T
-
-    def meastime(self, x, totaltime):
-
-        f = 30.0 + 1250. * np.array(x) ** 2
-
-        return totaltime * f / sum(f)
 
     def T(self, x):
 
@@ -214,6 +220,11 @@ class CANDOR(ReflectometerBase):
         self.detector_mask = 8.0
         self.sample_width = np.inf
 
+        # best practice Q scaling
+        self._mon0 = 20.0
+        self._mon1 = 20000.
+        self._Qpow = 3.0
+
         # load wavelength calibration
         wvcal = np.flipud(np.loadtxt(f'calibration/DetectorWavelengths_PG_integrate_sumeff_bank{bank}.csv', delimiter=',', usecols=[1, 2]))
         self._L = wvcal[:,0]
@@ -248,7 +259,8 @@ class CANDOR(ReflectometerBase):
 
     def meastime(self, x, totaltime):
 
-        f = 20.0 + 20000. * np.array(x) ** 3
+        q = a2q(np.array(x), 5.0)
+        f = self._mon0 + _self.mon1 * q ** self._Qpow
 
         return totaltime * f / sum(f)
 
