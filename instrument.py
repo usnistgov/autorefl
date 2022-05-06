@@ -260,7 +260,7 @@ class CANDOR(ReflectometerBase):
     def meastime(self, x, totaltime):
 
         q = a2q(np.array(x), 5.0)
-        f = self._mon0 + _self.mon1 * q ** self._Qpow
+        f = self._mon0 + self._mon1 * q ** self._Qpow
 
         return totaltime * f / sum(f)
 
