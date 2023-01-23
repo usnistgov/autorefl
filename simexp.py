@@ -17,6 +17,7 @@ from matplotlib.gridspec import GridSpec
 from sklearn.linear_model import LinearRegression
 from scipy.stats import norm
 from scipy.interpolate import interp1d
+from entropy import calc_entropy, calc_init_entropy, default_entropy_options
 import autorefl as ar
 import instrument
 
@@ -174,7 +175,7 @@ class SimReflExperiment(object):
             exp.take_step()
     """
 
-    def __init__(self, problem, Q, instrument=instrument.MAGIK(), eta=0.68, npoints=1, switch_penalty=1, bestpars=None, fit_options=fit_options, oversampling=11, meas_bkg=1e-6, startmodel=0, min_meas_time=10, select_pars=None) -> None:
+    def __init__(self, problem, Q, instrument=instrument.MAGIK(), eta=0.68, npoints=1, switch_penalty=1, bestpars=None, fit_options=fit_options, entropy_options=default_entropy_options, oversampling=11, meas_bkg=1e-6, startmodel=0, min_meas_time=10, select_pars=None) -> None:
         # running list of options: oversampling, background x nmodels, minQ, maxQ, fit_options, startmodel, wavelength
         # more options: eta, npoints, (nrepeats not necessary because multiple objects can be made and run), switch_penalty, min_meas_time
         # problem is the FitProblem object to simulate
@@ -260,8 +261,10 @@ class SimReflExperiment(object):
             self.sel = np.array(select_pars, ndmin=1)
 
         # calculate initial MVN entropy in the problem
-        self.init_entropy = ar.calc_init_entropy(problem)
-        self.init_entropy_marg = ar.calc_init_entropy(problem, select_pars=select_pars)
+        self.entropy_options = entropy_options
+        self.thinning = int(self.fit_options['steps']*0.05)
+        self.init_entropy = calc_init_entropy(problem, pop=fit_options['pop'] * fit_options['steps'] / self.thinning, options=entropy_options)
+        self.init_entropy_marg = calc_init_entropy(problem, select_pars=select_pars, pop=fit_options['pop'] * fit_options['steps'] / self.thinning, options=entropy_options)
 
         # initialize objects required for fitting
         self.fit_options = fit_options
@@ -406,13 +409,13 @@ class SimReflExperiment(object):
 
         step = self.steps[-1]
         step.chain_pop = chains[-1, :, :]
-        step.draw = fitter.state.draw(thin=int(self.fit_options['steps']*0.05))
+        step.draw = fitter.state.draw(thin=self.thinning)
         step.best_logp = fitter.state.best()[1]
         self.problem.setp(fitter.state.best()[0])
         step.final_chisq = self.problem.chisq_str()
-        step.H = ar.calc_entropy(step.draw.points)
+        step.H, _, _ = calc_entropy(step.draw.points, select_pars=None, options=self.entropy_options)
         step.dH = self.init_entropy - step.H
-        step.H_marg = ar.calc_entropy(step.draw.points, select_pars=self.sel)
+        step.H_marg, _, _ = calc_entropy(step.draw.points, select_pars=self.sel, options=self.entropy_options)
         step.dH_marg = self.init_entropy_marg - step.H_marg
 
         # Calculate the Q profiles associated with posterior distribution
@@ -737,7 +740,10 @@ class SimReflExperiment(object):
             N, P = pts.shape
             minci_sel, maxci_sel =  int(np.floor(N * (1 - select_ci_level) / 2)), int(np.ceil(N * (1 + select_ci_level) / 2))
             minci_meas, maxci_meas =  int(np.floor(N * (1 - meas_ci_level) / 2)), int(np.ceil(N * (1 + meas_ci_level) / 2))
-            H0 = ar.calc_entropy(pts)   # already marginalized!!
+            H0, _, predictor = calc_entropy(pts, select_pars=None, options=self.entropy_options, predictor=None)   # already marginalized!!
+            if predictor is not None:
+                predictor.warm_start = True
+
             all_H0.append(H0)
             # cycle though models
             for incident_neutrons, init_shape, q, xqprof in zip(intensities, intens_shapes, qs, xqprofs):
@@ -766,24 +772,34 @@ class SimReflExperiment(object):
                 #meas_sigma = 0.5 * np.diff(np.take_along_axis(xqprof, idxs[[minci_meas, maxci_meas],:], axis=0), axis=0)
 
                 init_time2 = time.time()
-                # Condition shape (now has dimension XD X P X M)
-                A = np.moveaxis(A, 0, -1)
-                A = A - np.mean(A, axis=-1, keepdims=True)
-                A_T = np.swapaxes(A, -1, -2)
 
-                # Calculate covariance matrix (shape XD X P X P)
-                covs = np.einsum('ikl,ilm->ikm', A, A_T, optimize='greedy') / (A.shape[-1] - 1)
+                if self.entropy_options['method'] == 'mvn_fast':
+                    # Condition shape (now has dimension XD X P X M)
+                    A = np.moveaxis(A, 0, -1)
+                    A = A - np.mean(A, axis=-1, keepdims=True)
+                    A_T = np.swapaxes(A, -1, -2)
 
-                # Alternate approach (slower for small arrays, faster for very large arrays)
-                #covs = list()
-                #for a in A:
-                #    covs.append(np.cov(a))
+                    # Calculate covariance matrix (shape XD X P X P)
+                    covs = np.einsum('ikl,ilm->ikm', A, A_T, optimize='greedy') / (A.shape[-1] - 1)
 
-                #print(f'Cov time: {time.time() - init_time2}')
+                    # Alternate approach (slower for small arrays, faster for very large arrays)
+                    #covs = list()
+                    #for a in A:
+                    #    covs.append(np.cov(a))
+
+                    #print(f'Cov time: {time.time() - init_time2}')
+                    
+                    # Calculate determinant (shape XD)
+                    _, dets = np.linalg.slogdet(covs)
+                    Hs = 0.5 * P * (np.log(2 * np.pi) + 1) + dets
                 
-                # Calculate determinant (shape XD)
-                _, dets = np.linalg.slogdet(covs)
-                Hs = 0.5 * P * (np.log(2 * np.pi) + 1) + dets
+                else:
+                    Hs = list()
+                    for a in A:
+                        tempH, _, predictor = calc_entropy(a, None, options=self.entropy_options, predictor=predictor)
+                        Hs.append(tempH)
+                    
+                    Hs = np.array(Hs)
 
                 # Calculate measurement times (shape XD)
                 med = np.median(xqprof, axis=0)
