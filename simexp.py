@@ -260,16 +260,17 @@ class SimReflExperiment(object):
         else:
             self.sel = np.array(select_pars, ndmin=1)
 
-        # calculate initial MVN entropy in the problem
-        self.entropy_options = entropy_options
-        self.thinning = int(self.fit_options['steps']*0.05)
-        self.init_entropy = calc_init_entropy(problem, pop=fit_options['pop'] * fit_options['steps'] / self.thinning, options=entropy_options)
-        self.init_entropy_marg = calc_init_entropy(problem, select_pars=select_pars, pop=fit_options['pop'] * fit_options['steps'] / self.thinning, options=entropy_options)
-
         # initialize objects required for fitting
         self.fit_options = fit_options
         self.steps = []
         self.restart_pop = None
+
+# calculate initial MVN entropy in the problem
+        self.entropy_options = entropy_options
+        self.thinning = int(self.fit_options['steps']*0.05)
+        self.init_entropy, _, _ = calc_init_entropy(problem, pop=fit_options['pop'] * fit_options['steps'] / self.thinning, options=entropy_options)
+        self.init_entropy_marg, _, _ = calc_init_entropy(problem, select_pars=select_pars, pop=fit_options['pop'] * fit_options['steps'] / self.thinning, options=entropy_options)
+
 
     def start_mapper(self):
         # deprecated: the call to "self" in self.mapper really slows down multiprocessing
@@ -772,7 +773,9 @@ class SimReflExperiment(object):
                 #meas_sigma = 0.5 * np.diff(np.take_along_axis(xqprof, idxs[[minci_meas, maxci_meas],:], axis=0), axis=0)
 
                 init_time2 = time.time()
-
+                # Condition shape (now has dimension XD X P X M)
+                A = np.moveaxis(A, 0, -1)
+             
                 if self.entropy_options['method'] == 'mvn_fast':
                     # Condition shape (now has dimension XD X P X M)
                     A = np.moveaxis(A, 0, -1)
@@ -796,7 +799,7 @@ class SimReflExperiment(object):
                 else:
                     Hs = list()
                     for a in A:
-                        tempH, _, predictor = calc_entropy(a, None, options=self.entropy_options, predictor=predictor)
+                        tempH, _, predictor = calc_entropy(a.T, None, options=self.entropy_options, predictor=predictor)
                         Hs.append(tempH)
                     
                     Hs = np.array(Hs)
@@ -1188,8 +1191,8 @@ class SimReflExperimentControl(SimReflExperiment):
     NOTE: a fixed $Q^2$ weighting is additionally applied to each Q point
     """
 
-    def __init__(self, problem, Q, model_weights=None, instrument=instrument.MAGIK(), eta=0.8, npoints=1, switch_penalty=1, bestpars=None, fit_options=fit_options, oversampling=11, meas_bkg=0.000001, startmodel=0, min_meas_time=10, select_pars=None) -> None:
-        super().__init__(problem, Q, instrument=instrument, eta=eta, npoints=npoints, switch_penalty=switch_penalty, bestpars=bestpars, fit_options=fit_options, oversampling=oversampling, meas_bkg=meas_bkg, startmodel=startmodel, min_meas_time=min_meas_time, select_pars=select_pars)
+    def __init__(self, problem, Q, model_weights=None, instrument=instrument.MAGIK(), eta=0.8, npoints=1, switch_penalty=1, bestpars=None, fit_options=fit_options, entropy_options=default_entropy_options, oversampling=11, meas_bkg=0.000001, startmodel=0, min_meas_time=10, select_pars=None) -> None:
+        super().__init__(problem, Q, instrument=instrument, eta=eta, npoints=npoints, switch_penalty=switch_penalty, bestpars=bestpars, fit_options=fit_options, entropy_options=entropy_options, oversampling=oversampling, meas_bkg=meas_bkg, startmodel=startmodel, min_meas_time=min_meas_time, select_pars=select_pars)
 
         if model_weights is None:
             model_weights = np.ones(self.nmodels)

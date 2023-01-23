@@ -118,6 +118,6 @@ def calc_entropy(pts, select_pars=None, options=default_entropy_options, predict
     
     return H, dH, predictor
 
-def calc_init_entropy(problem, pop, options=default_entropy_options):
+def calc_init_entropy(problem, pop, select_pars=None, options=default_entropy_options):
     #pop = fit_params['pop'] * fit_params['steps'] / thinning
-    return calc_entropy(generate(problem, init='random', pop=pop, use_point=False), options=options)
+    return calc_entropy(generate(problem, init='random', pop=pop, use_point=False), select_pars=select_pars, options=options)
