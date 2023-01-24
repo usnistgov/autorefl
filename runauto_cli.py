@@ -200,7 +200,7 @@ if __name__ == '__main__':
             print('Resumed, Step: %i, Total time so far: %0.1f' % (k, total_t))
             exp.fit_step()
             #exp.instrument.x = None # to turn off movement penalty
-            exp.take_step()
+            exp.take_step(allow_repeat=False)
             exp.save(pathname + '/' + basename + '_resume.pickle')
             k += 1
 
