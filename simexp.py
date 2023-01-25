@@ -773,36 +773,10 @@ class SimReflExperiment(object):
                 #meas_sigma = 0.5 * np.diff(np.take_along_axis(xqprof, idxs[[minci_meas, maxci_meas],:], axis=0), axis=0)
 
                 init_time2 = time.time()
-                # Condition shape (now has dimension XD X P X M)
-                A = np.moveaxis(A, 0, -1)
-             
-                if self.entropy_options['method'] == 'mvn_fast':
-                    # Condition shape (now has dimension XD X P X M)
-                    A = np.moveaxis(A, 0, -1)
-                    A = A - np.mean(A, axis=-1, keepdims=True)
-                    A_T = np.swapaxes(A, -1, -2)
 
-                    # Calculate covariance matrix (shape XD X P X P)
-                    covs = np.einsum('ikl,ilm->ikm', A, A_T, optimize='greedy') / (A.shape[-1] - 1)
-
-                    # Alternate approach (slower for small arrays, faster for very large arrays)
-                    #covs = list()
-                    #for a in A:
-                    #    covs.append(np.cov(a))
-
-                    #print(f'Cov time: {time.time() - init_time2}')
-                    
-                    # Calculate determinant (shape XD)
-                    _, dets = np.linalg.slogdet(covs)
-                    Hs = 0.5 * P * (np.log(2 * np.pi) + 1) + dets
-                
-                else:
-                    Hs = list()
-                    for a in A:
-                        tempH, _, predictor = calc_entropy(a.T, None, options=self.entropy_options, predictor=predictor)
-                        Hs.append(tempH)
-                    
-                    Hs = np.array(Hs)
+                # Condition shape (now has dimension M X P X XD)
+                A = np.moveaxis(A, -1, 1)
+                Hs, _, predictor = calc_entropy(A, None, options=self.entropy_options, predictor=predictor)
 
                 # Calculate measurement times (shape XD)
                 med = np.median(xqprof, axis=0)

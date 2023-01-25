@@ -1,7 +1,7 @@
 import numpy as np
 from bumps.initpop import generate
 
-default_entropy_options = {'method': 'mvn'}
+default_entropy_options = {'method': 'mvn_fast'}
 
 def gmm_entropy(points, n_est=None, n_components=None, covariance_type='full', predictor=None):
     r"""
@@ -75,6 +75,7 @@ def calc_entropy(pts, select_pars=None, options=default_entropy_options, predict
 
         Inputs:
         pts -- N (number of samples) x P (number of parameters) array, e.g. from MCMCDraw.points
+            OR N x P x D, where D is a number of entropy values to be calculated in parallel
         select_pars -- if None, all parameters are used; otherwise a list or array of parameter indices to use
                         for marginalization
         method -- 'mvn' (multivariate normal) or 'gmm' (gaussian mixture model)
@@ -86,8 +87,8 @@ def calc_entropy(pts, select_pars=None, options=default_entropy_options, predict
 
     """
 
-    # define number of parameters
-    npar = len(pts[0,:])
+    # define number of parameters (always the size of the second dimension)
+    npar = int(pts.shape[1])
 
     # select parameters of interest (all if select_pars is None)
     if select_pars is None:
@@ -95,28 +96,71 @@ def calc_entropy(pts, select_pars=None, options=default_entropy_options, predict
     else:
         sel = np.array(select_pars)
 
+    # reset number of parameters of interest
+    npar = len(sel)
+
     pts = pts[:,sel]
 
+    # ensure 3 dimensions
+    if pts.ndim < 3:
+        pts = np.expand_dims(pts, -1)
+
+    # now has shape D x N x P
+    A = np.moveaxis(pts, -1, 0)
+
     # calculate entropy with selected method
-    if options['method'] == 'mvn':
-        npar = len(sel)
+    if options['method'] == 'mvn_fast':
 
-        covX = np.cov(pts.T)
+        # remove averages over all samples
+        A = A - np.mean(A, axis=-2, keepdims=True)
 
-        # protects against single selected parameters that give zero-dimension covX
-        covX = np.array(covX, ndmin=2)
+        # calculate transpose (shape D x P x N)
+        A_T = np.swapaxes(A, -1, -2)
 
-        H = 0.5 * npar * (np.log(2 * np.pi) + 1) + np.linalg.slogdet(covX)[1]
-        H /= np.log(2)
-        dH, predictor = None, None
+        # Calculate covariance matrix (shape D X P X P)
+        covs = np.einsum('ikl,ilm->ikm', A_T, A, optimize='greedy') / (A_T.shape[-1] - 1)
+
+        # Alternate approach (slower for small arrays, faster for very large arrays)
+        #covs = list()
+        #for a in A_T:
+        #    covs.append(np.cov(a))
+
+        # Calculate determinant (shape XD)
+        _, dets = np.linalg.slogdet(covs)
+        Hs = 0.5 * npar * (np.log(2 * np.pi) + 1) + dets
+        Hs /= np.log(2)
+        dHs, predictor = None, None
+
+    elif options['method'] == 'mvn':
+        Hs = list()
+        for a in A:
+            covX = np.cov(a.T)
+
+            # protects against single selected parameters that give zero-dimension covX
+            covX = np.array(covX, ndmin=2)
+
+            H = 0.5 * npar * (np.log(2 * np.pi) + 1) + np.linalg.slogdet(covX)[1]
+            H /= np.log(2)
+            Hs.append(H)
+
+        Hs = np.array(Hs)
+        dHs, predictor = None, None
 
     elif options['method'] == 'gmm':
-        H, dH, predictor = gmm_entropy(pts, covariance_type='full', predictor=predictor)
+        Hs = list()
+        dHs = list()
+        for a in A:
+            H, dH, predictor = gmm_entropy(a, covariance_type='full', predictor=predictor)
+            Hs.append(H)
+            dHs.append(dH)
+            
+        Hs = np.array(Hs)
+        dHs = np.array(dHs)
 
     else:
-        H, dH, predictor = None, None, None
+        Hs, dHs, predictor = None, None, None
     
-    return H, dH, predictor
+    return Hs, dHs, predictor
 
 def calc_init_entropy(problem, pop, select_pars=None, options=default_entropy_options):
     #pop = fit_params['pop'] * fit_params['steps'] / thinning
