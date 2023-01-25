@@ -1152,7 +1152,13 @@ class SimReflExperiment(object):
         """
 
         with open(fn, 'rb') as f:
-            return dill.load(f)
+            exp = dill.load(f)
+        
+        # for back compatibility
+        if not hasattr(exp, 'entropy_options'):
+            exp.entropy_options = default_entropy_options
+        
+        return exp
 
 class SimReflExperimentControl(SimReflExperiment):
     r"""Control experiment with even or scaled distribution of count times
