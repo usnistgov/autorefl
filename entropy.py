@@ -161,7 +161,7 @@ def calc_entropy(pts, select_pars=None, options=default_entropy_options, predict
     else:
         Hs, dHs, predictor = None, None, None
     
-    return Hs, dHs, predictor
+    return np.squeeze(Hs), np.squeeze(dHs), predictor
 
 def calc_init_entropy(problem, pop, select_pars=None, options=default_entropy_options):
     #pop = fit_params['pop'] * fit_params['steps'] / thinning
