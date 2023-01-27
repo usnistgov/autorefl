@@ -149,8 +149,9 @@ def calc_entropy(pts, select_pars=None, options=default_entropy_options, predict
     elif options['method'] == 'gmm':
         Hs = list()
         dHs = list()
+        n_components = None if 'n_components' not in options.keys() else options['n_components']
         for a in A:
-            H, dH, predictor = gmm_entropy(a, covariance_type='full', predictor=predictor)
+            H, dH, predictor = gmm_entropy(a, n_components=n_components, covariance_type='full', predictor=predictor)
             Hs.append(H)
             dHs.append(dH)
             
