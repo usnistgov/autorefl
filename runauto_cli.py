@@ -34,6 +34,7 @@ parser.add_argument('--maxtime', type=float, default=21.6e3)
 parser.add_argument('--penalty', type=float, default=1.0)
 parser.add_argument('--timepenalty', type=float, default=0.0)
 parser.add_argument('--entropy_method', type=str, default='mvn_fast')
+parser.add_argument('--gmm_n_components', type=int)
 parser.add_argument('--burn', type=int, default=1000)
 parser.add_argument('--steps', type=int, default=500)
 parser.add_argument('--pop', type=int, default=8)
@@ -50,7 +51,8 @@ args = parser.parse_args()
 # define fit options dictionary
 fit_keys = ['burn', 'pop', 'steps', 'init', 'alpha']
 fit_options = dict([(k, getattr(args, k)) for k in fit_keys])
-entropy_options = {'method': args.entropy_method}
+entropy_options = {'method': args.entropy_method, 'n_components': args.gmm_n_components}
+print(entropy_options)
 #fit_options = {'burn': 1000, 'pop': 8, 'steps': 500, 'init': 'lhs', 'alpha': 0.001}
 
 if __name__ == '__main__':
