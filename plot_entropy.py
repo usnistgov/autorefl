@@ -51,8 +51,8 @@ def combinedata(explist, controls=False):
         print(exp.problem.chisq_str())
         allt, allH, allH_marg = load_entropy(exp.steps[:-1]) if not controls else load_entropy(exp.steps, control=True)
         allts.append(allt)
-        allHs.append(allH)
-        allHs_marg.append(allH_marg)
+        allHs.append(np.squeeze(allH))
+        allHs_marg.append(np.squeeze(allH_marg))
 
     t = np.unique(np.array(allt).flatten())
     allHi = list()
