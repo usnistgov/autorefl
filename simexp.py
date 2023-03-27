@@ -266,7 +266,7 @@ class SimReflExperiment(object):
         self.restart_pop = None
 
 # calculate initial MVN entropy in the problem
-        self.entropy_options = entropy_options
+        self.entropy_options = {**default_entropy_options, **entropy_options}
         self.thinning = int(self.fit_options['steps']*0.05)
         self.init_entropy, _, _ = calc_init_entropy(problem, pop=fit_options['pop'] * fit_options['steps'] / self.thinning, options=entropy_options)
         self.init_entropy_marg, _, _ = calc_init_entropy(problem, select_pars=select_pars, pop=fit_options['pop'] * fit_options['steps'] / self.thinning, options=entropy_options)
@@ -449,6 +449,10 @@ class SimReflExperiment(object):
         print('Calculating figures of merit:')
         init_time = time.time()
         pts = step.draw.points[:, self.sel]
+
+        if self.entropy_options['scale']:
+            pts = copy.copy(pts) / self.par_scale[:, self.sel]
+
         qprofs = step.qprofs
         foms, meastimes, Hs, newpoints = self._fom_from_draw(pts, qprofs, select_ci_level=0.68, meas_ci_level=self.eta, n_forecast=self.npoints, allow_repeat=allow_repeat)
         print('Total figure of merit calculation time: %f' % (time.time() - init_time))

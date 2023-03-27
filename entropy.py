@@ -1,7 +1,7 @@
 import numpy as np
 from bumps.initpop import generate
 
-default_entropy_options = {'method': 'mvn_fast'}
+default_entropy_options = {'method': 'mvn_fast', 'scale': False}
 
 def gmm_entropy(points, n_est=None, n_components=None, covariance_type='full', predictor=None):
     r"""
