@@ -1,3 +1,86 @@
+""" Command line interface for running simulated reflectometry measurements
+
+Example:
+python runauto_cli.py ssblm.py --pars ssblm_tosb0.par --name both_forecast_q025
+    --sel 10 11 12 13 14 --eta 0.50 --meas_bkg 3e-6 3e-5 --maxtime 43.2e3 --burn 1000 --steps 500
+    --pop 8 --instrument MAGIK --qmax 0.25 --qstep_max 0.0024
+
+Required arguments:
+
+model -- a Refl1D model script (.py)
+
+Optionsl arguments:
+
+--pars -- a file containing a parameter file (e.g. a Refl1D .par output file) containing ground
+            truth values for each parameter
+
+--name -- suffix to the simulation storage directory. Directory name has format:
+            {instrument}_npoints{npoints}_nrepeats{nrepeats}_{datetime}_{name}
+
+--control -- flags this as a control measurement
+
+--nctrlpts -- number of control points to use (only used if --control is present)
+
+--nomovie -- does not create a movie after simulation is complete
+
+--sel -- list of parameter indices to use for figure of merit calculation
+
+--meas_bkg -- measurement background (float). Single value or list, one for each model in the
+                Refl1D script
+
+--model_weights -- weights for the models (only used with --control). Does not have to be
+                    normalized to unity
+
+--eta -- confidence interval parameter; default 0.68. Ignored for controls.
+
+--npoints -- number of points to simulate/measure at a time (uses forecasting)
+
+--nrepeats -- number of times to repeat the simulation/measurement
+
+--maxtime -- stopping criterion: maximum total time (measurement + movement)
+
+--penalty -- penalty for switching models (simexp.switch_penalty)
+
+--timepenalty -- time penalty for switching models (simexp.switch_time_penalty)
+
+--entropy_method -- method used to calculate entropy. Default is mvn_fast; other options are
+                    'mvn' or 'gmm'
+
+--gmm_n_components -- if 'gmm' is the entropy method, number of components to use. '1' is equivalent
+                        to 'mvn'. If not specified, default 5*sqrt(n_parameters) is used
+
+--scale_samples -- scale the parameter values before doing figure of merit calculation. May improve
+                    performance of gmm calculation. Largely untested.
+
+--burn -- max number of burn steps for Refl1D fit
+
+--steps -- number of steps for Refl1D fit
+
+--pop -- population scale factor for Refl1D fit
+
+--alpha -- convergence criterion for Refl1D fit
+
+--init -- initialization for Refl1D fit. Default 'lhs'
+
+--resume -- specify a previous fit to resume. Must give full path to pickle file. File name will
+            be the same with _resume.pickle added.
+
+--instrument -- which reflectometry instrument to use. Default 'MAGIK'. 'CANDOR' also supported
+
+--oversampling -- oversampling level in Refl1D calculations
+
+--qmin -- minimum Q value for Q measurement space; default 0.008
+
+--qmax -- maximum Q value for Q measurement space; default 0.250
+
+--qstep -- Q step size at minimum Q value; default 0.0005
+
+--qstep_max -- Q step size at maximum Q value; if not provided, qstep value is used over
+                the whole range, otherwise step size increases linearly from qstep
+                to qstep_max
+
+"""
+
 import datetime
 import numpy as np
 import copy
@@ -24,7 +107,7 @@ parser.add_argument('--nomovie', action='store_true')
 parser.add_argument('--sel', type=int, nargs='+')
 parser.add_argument('--meas_bkg', type=float, nargs='+')
 parser.add_argument('--model_weights', type=float, nargs='+')
-parser.add_argument('--eta', type=float, default=0.8)
+parser.add_argument('--eta', type=float, default=0.68)
 parser.add_argument('--alpha', type=float, default=0.001)
 parser.add_argument('--npoints', type=int, default=1)
 parser.add_argument('--nrepeats', type=int, default=1)
