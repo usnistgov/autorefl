@@ -2,13 +2,15 @@ import numpy as np
 import copy
 import time
 import dill
+from typing import Tuple, Union, List
+
 #from bumps.cli import load_model, load_best
 from bumps.fitters import DreamFit, ConsoleMonitor, _fill_defaults, StepMonitor
 from bumps.initpop import generate
 from bumps.mapper import MPMapper
 from bumps.dream.stats import credible_interval
-#from bumps.dream.state import load_state
-#from refl1d.names import FitProblem, Experiment
+from bumps.dream.state import MCMCDraw
+from refl1d.names import FitProblem, Experiment
 from refl1d.resolution import TL2Q, dTdL2dQ
 import matplotlib.pyplot as plt
 from matplotlib import cm, colors
@@ -22,6 +24,11 @@ import autorefl as ar
 import instrument
 
 fit_options = {'pop': 10, 'burn': 1000, 'steps': 500, 'init': 'lhs', 'alpha': 0.001}
+
+data_tuple = Tuple[Union[np.ndarray, list], Union[np.ndarray, list],
+                                   Union[np.ndarray, list], Union[np.ndarray, list],
+                                   Union[np.ndarray, list], Union[np.ndarray, list],
+                                   Union[np.ndarray, list]]
 
 class DataPoint(object):
     """ Container object for a single data point.
@@ -56,13 +63,16 @@ class DataPoint(object):
     Q -- returns an array of Q points corresponding to T and L.
     """
 
-    def __init__(self, x, meastime, modelnum, data, merit=None, movet=0.0):
+    def __init__(self, x: float, meastime: float, modelnum: int,
+                       data: data_tuple,
+                       merit: Union[bool, None] = None,
+                       movet: float = 0.0):
         self.model = modelnum
         self.t = meastime
         self.movet = movet
         self.merit = merit
         self.x = x
-        self._data = None
+        self._data: data_tuple = None
         self.data = data
 
     def __repr__(self):
@@ -80,7 +90,7 @@ class DataPoint(object):
         return self._data
 
     @data.setter
-    def data(self, newdata):
+    def data(self, newdata) -> None:
         """populates T, dT, L, dL, N, Nbkg, Ninc.
             newdata is a length-7 tuple of lists"""
         self._data = newdata
@@ -121,37 +131,37 @@ class ExperimentStep(object):
         movetime -- returns the total movement time or the time from a specific model
     """
 
-    def __init__(self, points, use=True) -> None:
+    def __init__(self, points: List[DataPoint], use=True) -> None:
         self.points = points
-        self.H = None
-        self.dH = None
-        self.H_marg = None
-        self.dH_marg = None
-        self.foms = None
-        self.scaled_foms = None
-        self.meastimes = None
-        self.qprofs = None
-        self.qbkgs = None
-        self.best_logp = None
-        self.final_chisq = None
-        self.draw = None
-        self.chain_pop = None
-        self.use = use
+        self.H: Union[float, None] = None
+        self.dH: Union[float, None] = None
+        self.H_marg: Union[float, None] = None
+        self.dH_marg: Union[float, None] = None
+        self.foms: Union[List[np.ndarray], None] = None
+        self.scaled_foms: Union[List[np.ndarray], None] = None
+        self.meastimes: Union[List[np.ndarray], None] = None
+        self.qprofs: Union[List[np.ndarray], None] = None
+        self.qbkgs: Union[List[np.ndarray], None] = None
+        self.best_logp: Union[float, None] = None
+        self.final_chisq: Union[str, None] = None
+        self.draw: Union[MCMCDraw, None] = None
+        self.chain_pop: Union[np.ndarray, None] = None
+        self.use: bool = use
 
-    def getdata(self, attr, modelnum):
+    def getdata(self, attr: str, modelnum: int) -> list:
         # returns all data of type "attr" for a specific model
         if self.use:
             return [getattr(pt, attr) for pt in self.points if pt.model == modelnum]
         else:
             return []
 
-    def meastime(self, modelnum=None):
+    def meastime(self, modelnum: Union[int, None] = None) -> float:
         if modelnum is None:
             return sum([pt.t for pt in self.points])
         else:
             return sum([pt.t for pt in self.points if pt.model == modelnum])
 
-    def movetime(self, modelnum=None):
+    def movetime(self, modelnum: Union[int, None] = None) -> float:
         if modelnum is None:
             return sum([pt.movet for pt in self.points])
         else:
@@ -173,13 +183,51 @@ class SimReflExperiment(object):
         while (condition):
             exp.fit_step()
             exp.take_step()
+
+    Inputs:
+    problem -- a Refl1d FitProblem describing the reflectometry experiment. Multiple models (M)
+                are supported. Required.
+    Q -- numpy array or nested list of Q bins for reducing data. Can be either a single Q vector
+        (applied to each model), or an M-element list of Q bins, one for each model. Required.
+    instrument -- instrument definition based on the instrument.ReflectometerBase class; default
+                   MAGIK
+    eta -- confidence interval for measurement time determination; default 0.68
+    npoints -- integer number of points to measure in each step; if > 1, forecasting is used to 
+                determine subsequent points; default 1
+    switch_penalty -- scaling factor on the figure of merit to switch models, i.e. applied only
+                      to models that are not the current one; default 1.0 (no penalty)
+    switch_time_penalty -- time required to switch models, i.e. applied only
+                      to models that are not the current one; default 0.0 (no penalty)
+    bestpars -- numpy array or list or None: best fit (ground truth) parameters (length P
+                parameters). Used for simulating new data
+    fit_options -- dictionary of Bumps fitter fit options; default {'pop': 10, 'burn': 1000,
+                    'steps': 500, 'init': 'lhs', 'alpha': 0.001}
+    entropy_options -- dictionary of entropy options; default entropy.default_entropy_options
+    oversampling -- integer oversampling value for calculating Refl1D models. Default 11; should be
+                    > 1 for accurate simulations.
+    meas_bkg -- single float of list of M floats representing the measurement background level
+                (unsubtracted) for each model.
+    startmodel -- integer index of starting model; default 0.
+    min_meas_time -- minimum measurement time (float); default 10.0 seconds
+    select_pars -- selected parameters for entropy determination. None uses all parameters, otherwise
+                    list of parameter indices
     """
 
-    def __init__(self, problem, Q, instrument=instrument.MAGIK(), eta=0.68, npoints=1, switch_penalty=1, bestpars=None, fit_options=fit_options, entropy_options=default_entropy_options, oversampling=11, meas_bkg=1e-6, startmodel=0, min_meas_time=10, select_pars=None) -> None:
-        # running list of options: oversampling, background x nmodels, minQ, maxQ, fit_options, startmodel, wavelength
-        # more options: eta, npoints, (nrepeats not necessary because multiple objects can be made and run), switch_penalty, min_meas_time
-        # problem is the FitProblem object to simulate
-        # Q is a single Q vector or a list of measurement Q vectors, one for each model in problem
+    def __init__(self, problem: FitProblem,
+                       Q: Union[np.ndarray, List[np.ndarray]],
+                       instrument: instrument.ReflectometerBase = instrument.MAGIK(),
+                       eta: float = 0.68,
+                       npoints: int = 1,
+                       switch_penalty: float = 1.0,
+                       switch_time_penalty: float = 0.0,
+                       bestpars: Union[np.ndarray, list, None] = None,
+                       fit_options: dict = fit_options,
+                       entropy_options: dict = default_entropy_options,
+                       oversampling: int = 11,
+                       meas_bkg: Union[float, List[float]] = 1e-6,
+                       startmodel: int = 0,
+                       min_meas_time: float = 10.0,
+                       select_pars: Union[list, None] = None) -> None:
         
         self.attr_list = ['T', 'dT', 'L', 'dL', 'N', 'Nbkg', 'Ninc']
 
@@ -190,12 +238,12 @@ class SimReflExperiment(object):
         self.eta = eta
         self.npoints = int(npoints)
         self.switch_penalty = switch_penalty
-        self.switch_time_penalty = 0.0          # turn into parameter later?
+        self.switch_time_penalty = switch_time_penalty
         self.min_meas_time = min_meas_time
 
         # Initialize the fit problem
         self.problem = problem
-        models = [problem] if hasattr(problem, 'fitness') else list(problem.models)
+        models: List[Union[Experiment, FitProblem]] = [problem] if hasattr(problem, 'fitness') else list(problem.models)
         self.models = models
         self.nmodels = len(models)
         self.curmodel = startmodel
@@ -227,7 +275,7 @@ class SimReflExperiment(object):
         # to a specific instrument configuration; this is defined in the instrument module.
         # TODO: Make separate measurement list. Because Q is used for rebinning, it should
         # have a different length from "x"
-        self.x = list()
+        self.x: List[np.ndarray] = list()
         for Q in self.measQ:
             minx, maxx = self.instrument.qrange2xrange([min(Q), max(Q)])
             self.x.append(np.linspace(minx, maxx, len(Q), endpoint=True))
@@ -236,34 +284,34 @@ class SimReflExperiment(object):
         self.npars = len(problem.getp())
         self.orgQ = [list(m.fitness.probe.Q) for m in models]
         calcmodel = copy.deepcopy(problem)
-        self.calcmodels = [calcmodel] if hasattr(calcmodel, 'fitness') else list(calcmodel.models)
+        self.calcmodels: List[Union[Experiment, FitProblem]] = [calcmodel] if hasattr(calcmodel, 'fitness') else list(calcmodel.models)
         if bestpars is not None:
             calcmodel.setp(bestpars)
 
         # deal with inherent measurement background
         if not isinstance(meas_bkg, (list, np.ndarray)):
-            self.meas_bkg = np.full(self.nmodels, meas_bkg)
+            self.meas_bkg: np.ndarray = np.full(self.nmodels, meas_bkg)
         else:
-            self.meas_bkg = np.array(meas_bkg)
+            self.meas_bkg: np.ndarray = np.array(meas_bkg)
 
         # add residual background
-        self.resid_bkg = np.array([c.fitness.probe.background.value for c in self.calcmodels])
+        self.resid_bkg: np.ndarray = np.array([c.fitness.probe.background.value for c in self.calcmodels])
 
         # these are not used
         self.newmodels = [m.fitness for m in models]
-        self.par_scale = np.diff(problem.bounds(), axis=0)
+        self.par_scale: np.ndarray = np.diff(problem.bounds(), axis=0)
 
         # set and condition selected parameters for marginalization; use all parameters
         # if none are specified
         if select_pars is None:
-            self.sel = np.arange(self.npars)
+            self.sel: np.ndarray = np.arange(self.npars)
         else:
-            self.sel = np.array(select_pars, ndmin=1)
+            self.sel: np.ndarray = np.array(select_pars, ndmin=1)
 
         # initialize objects required for fitting
         self.fit_options = fit_options
-        self.steps = []
-        self.restart_pop = None
+        self.steps: List[ExperimentStep] = []
+        self.restart_pop: Union[np.ndarray, None] = None
 
 # calculate initial MVN entropy in the problem
         self.entropy_options = {**default_entropy_options, **entropy_options}
@@ -272,40 +320,43 @@ class SimReflExperiment(object):
         self.init_entropy_marg, _, _ = calc_init_entropy(problem, select_pars=select_pars, pop=fit_options['pop'] * fit_options['steps'] / self.thinning, options=entropy_options)
 
 
-    def start_mapper(self):
+    def start_mapper(self) -> None:
         # deprecated: the call to "self" in self.mapper really slows down multiprocessing
         setattr(self.problem, 'calcQs', self.measQ)
         setattr(self.problem, 'oversampling', self.oversampling)
 
         self.mapper = MPMapper.start_mapper(self.problem, None, cpus=0)
 
-    def stop_mapper(self):
+    def stop_mapper(self) -> None:
         # terminates the multiprocessing mapper pool
         MPMapper.pool.terminate()
         
         # allow start_mapper call again
         MPMapper.pool = None
 
-    def get_all_points(self, modelnum):
+    def get_all_points(self, modelnum: Union[int, None]) -> List[DataPoint]:
         # returns all data points associated with model with index modelnum
         return [pt for step in self.steps for pt in step.points if pt.model == modelnum]
 
-    def getdata(self, attr, modelnum):
+    def getdata(self, attr: str, modelnum: Union[int, None]) -> list:
         # returns all data of type "attr" for a specific model
         return [getattr(pt, attr) for pt in self.get_all_points(modelnum)]
 
-    def compile_datapoints(self, Qbasis, points):
+    def compile_datapoints(self, Qbasis, points) -> Tuple:
         # bins all of the data from a list "points" onto a Q-space "Qbasis"
         idata = [[val for pt in points for val in getattr(pt, attr)] for attr in self.attr_list]
 
         return ar.compile_data_N(Qbasis, *idata)
 
-    def add_initial_step(self, dRoR=10.0):
-        # generate initial data set. This is only necessary because of the requirement that dof > 0
-        # in Refl1D (probably not strictly required for DREAM fit)
-        # dRoR is the target uncertainty relative to the average of the reflectivity and
-        # determines the "measurement time" for the initial data set. This should be larger
-        # than about 3 so as not to constrain the parameters before collecting any real data.
+    def add_initial_step(self, dRoR=10.0) -> None:
+        """ Generate initial data set. This is only necessary because of the requirement that
+            dof > 0 in Refl1D (not strictly required for DREAM fit)
+            
+            Inputs:
+            dRoR -- target uncertainty relative to the average of the reflectivity, default 10.0;
+                    determines the "measurement time" for the initial data set. This should be
+                    > 3 so as not to constrain the parameters before collecting any real data.
+        """
 
         # evenly spread the Q points over the models in the problem
         nQs = [((self.npars + 1) // self.nmodels) + 1 if i < ((self.npars + 1) % self.nmodels) else ((self.npars + 1) // self.nmodels) for i in range(self.nmodels)]
@@ -348,7 +399,7 @@ class SimReflExperiment(object):
         # Add the step with the new points
         self.add_step(points, use=False)
 
-    def update_models(self):
+    def update_models(self) -> None:
         # Update the models in the fit problem with new data points. Should be run every time
         # new data are to be incorporated into the model
         for i, (m, measQ) in enumerate(zip(self.models, self.measQ)):
@@ -362,7 +413,7 @@ class SimReflExperiment(object):
         self.problem.model_reset()
         self.problem.chisq_str()
 
-    def calc_qprofiles(self, drawpoints, mappercalc):
+    def calc_qprofiles(self, drawpoints: np.ndarray, mappercalc) -> np.ndarray:
         # q-profile calculator using multiprocessing for speed
         # this version is limited to calculating profiles with measQ, cannot be used with initial calculation
         res = mappercalc(drawpoints)
@@ -374,7 +425,7 @@ class SimReflExperiment(object):
 
         return qprofs
 
-    def fit_step(self, outfid=None):
+    def fit_step(self, outfid=None) -> None:
         """Analyzes most recent step"""
         
         # Update models
@@ -430,7 +481,7 @@ class SimReflExperiment(object):
         MPMapper.stop_mapper(mapper)
         MPMapper.pool = None
 
-    def take_step(self, allow_repeat=True):
+    def take_step(self, allow_repeat=True) -> None:
         """Analyze the last fitted step and add the next one
         
         Procedure:
@@ -440,6 +491,11 @@ class SimReflExperiment(object):
             (1 and 2 are currently done in _fom_from_draw)
             3. Simulate the new data points
             4. Add a new step for fitting.
+
+        Inputs:
+            allow_repeat -- toggles whether to allow measurement at the same point over and over;
+                            default True. (Can cause issues if MCMC fit isn't converged in
+                            high-gradient areas, e.g. around the critical edge)
         """
 
         # Focus on the last step
@@ -450,14 +506,16 @@ class SimReflExperiment(object):
         init_time = time.time()
         pts = step.draw.points[:, self.sel]
 
+        # can scale parameters for entropy calculations. Helps with GMM.
+        # TODO: check that this works. Does it need to be implemented in entropy.calc_entropy?
         if self.entropy_options['scale']:
             pts = copy.copy(pts) / self.par_scale[:, self.sel]
 
-        qprofs = step.qprofs
-        foms, meastimes, Hs, newpoints = self._fom_from_draw(pts, qprofs, select_ci_level=0.68, meas_ci_level=self.eta, n_forecast=self.npoints, allow_repeat=allow_repeat)
+        foms, meastimes, _, newpoints = self._fom_from_draw(pts, step.qprofs, select_ci_level=0.68, meas_ci_level=self.eta, n_forecast=self.npoints, allow_repeat=allow_repeat)
         print('Total figure of merit calculation time: %f' % (time.time() - init_time))
 
-        # populate step foms (TODO: current analysis code can't handle multiple foms, could pass all of them in here)
+        # populate step foms
+        # TODO: current analysis code can't handle multiple foms, could pass all of them in here
         step.foms, step.meastimes = foms[0], meastimes[0]
 
         # Determine next measurement point(s).
@@ -481,12 +539,27 @@ class SimReflExperiment(object):
         
         self.add_step(points)
 
-    def add_step(self, points, use=True):
-        # Adds a set of DataPoint objects as a new ExperimentStep
+    def add_step(self, points, use=True) -> None:
+        """Adds a set of DataPoint objects as a new ExperimentStep
+
+        Inputs:
+            points: list of DataPoints for the step\
+            use: boolean toggle for whether to use this step for plotting. Default true.
+        """
         self.steps.append(ExperimentStep(points, use=use))
 
-    def _apply_fom_penalties(self, foms, curmodel=None):
-        # Applies any penalties that scale the figures of merit directly
+    def _apply_fom_penalties(self, foms, curmodel=None) -> List[np.ndarray]:
+        """
+        Applies any penalties that scale the figures of merit directly
+
+        Inputs:
+        foms -- list of of figure of merits, one for each model
+        curmodel -- integer index of current model
+
+        Returns:
+        scaled_foms -- scaled list of figures of merit (list of numpy arrays)
+        """
+
         if curmodel is None:
             curmodel = self.curmodel
 
@@ -498,9 +571,20 @@ class SimReflExperiment(object):
 
         return scaled_foms
 
-    def _apply_time_penalties(self, foms, meastimes, curmodel=None):
-        # Applies any penalties that act to increase the measurement time, e.g. movement penalties or model switch time penalities
-        # NOTE: uses current state of the instrument (self.instrument.x).
+    def _apply_time_penalties(self, foms, meastimes, curmodel=None) -> List[np.ndarray]:
+        """
+        Applies any penalties that act to increase the measurement time, e.g. movement penalties or model switch time penalities
+        NOTE: uses current state of the instrument (self.instrument.x).
+
+        Inputs:
+        foms -- list of of figure of merits, one for each model
+        meastimes -- list of proposed measurement time vectors, one for each model
+        curmodel -- integer index of current model
+
+        Returns:
+        scaled_foms -- scaled list of figures of merit (list of numpy arrays)
+        """
+
         if curmodel is None:
             curmodel = self.curmodel
 
@@ -517,7 +601,6 @@ class SimReflExperiment(object):
         scaled_foms = [fom * movepen for fom,movepen in zip(foms, movepenalty)]
 
         return scaled_foms
-
 
     def _marginalization_efficiency(self, Qth, qprof, points):
         """ Calculate the marginalization efficiency: the fraction of uncertainty in R(Q) that
@@ -664,7 +747,15 @@ class SimReflExperiment(object):
 
         return foms, meas_times
 
-    def _fom_from_draw(self, pts, qprofs, select_ci_level=0.68, meas_ci_level=0.68, n_forecast=1, allow_repeat=True):
+    def _fom_from_draw(self, pts: np.ndarray,
+                        qprofs: List[np.ndarray],
+                        select_ci_level: float = 0.68,
+                        meas_ci_level: float = 0.68,
+                        n_forecast: int = 1,
+                        allow_repeat: bool = True) -> Tuple[List[List[np.ndarray]],
+                                                            List[List[np.ndarray]],
+                                                            List[float],
+                                                            List[List[int, int, float, float]]]:
         """ Calculate figure of merit from a set of draw points and associated q profiles
         
             Inputs:
@@ -687,7 +778,7 @@ class SimReflExperiment(object):
             X -- number of x values in xs
             D -- number of detectors
             N -- number of samples
-            P -- number of marginalized paramters"""
+            P -- number of marginalized parameters"""
 
         # Cycle through models, with model-specific x, Q, calculated q profiles, and measurement background level
         # Populate q vectors, interpolated q profiles (slow), and intensities
@@ -1033,7 +1124,8 @@ class SimReflExperiment(object):
 
         return foms, meas_times
 
-    def _find_fom_maxima(self, scaled_foms, start=0):
+    def _find_fom_maxima(self, scaled_foms: List[np.ndarray],
+                         start: int = 0) -> List[List[float, int, int]]:
         """Finds all maxima in the figure of merit, including the end points
         
             Inputs:
@@ -1079,7 +1171,10 @@ class SimReflExperiment(object):
         # returns sorted list of lists, each with entries [max fom value, model number, measQ index]
         return top_n
 
-    def _generate_new_point(self, mnum, newx, new_meastime, maxfom=None):
+    def _generate_new_point(self, mnum: int,
+                                  newx: float,
+                                  new_meastime: float,
+                                  maxfom: Union[float, None] = None) -> DataPoint:
         """ Generates a new data point with simulated data from the specified x
             position, model number, and measurement time
             
@@ -1088,6 +1183,8 @@ class SimReflExperiment(object):
             newx -- the x position of the new point
             new_meastime -- the measurement time
             maxfom -- the maximum of the figure of merit. Only used for record-keeping
+
+            Returns a single DataPoint object
         """
         
         T = self.instrument.T(newx)[0]
