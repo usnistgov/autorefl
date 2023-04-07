@@ -4,21 +4,16 @@ import time
 import dill
 from typing import Tuple, Union, List
 
-#from bumps.cli import load_model, load_best
-from bumps.fitters import DreamFit, ConsoleMonitor, _fill_defaults, StepMonitor
+from bumps.fitters import ConsoleMonitor, _fill_defaults, StepMonitor
 from bumps.initpop import generate
 from bumps.mapper import MPMapper
-from bumps.dream.stats import credible_interval
 from bumps.dream.state import MCMCDraw
 from refl1d.names import FitProblem, Experiment
-from refl1d.resolution import TL2Q, dTdL2dQ
+from refl1d.resolution import TL2Q
 import matplotlib.pyplot as plt
-from matplotlib import cm, colors
 from matplotlib.gridspec import GridSpec
-#from bumps.mapper import can_pickle, SerialMapper
-from sklearn.linear_model import LinearRegression
-from scipy.stats import norm
 from scipy.interpolate import interp1d
+
 from entropy import calc_entropy, calc_init_entropy, default_entropy_options
 import autorefl as ar
 import instrument
@@ -319,21 +314,6 @@ class SimReflExperiment(object):
         self.init_entropy, _, _ = calc_init_entropy(problem, pop=fit_options['pop'] * fit_options['steps'] / self.thinning, options=entropy_options)
         self.init_entropy_marg, _, _ = calc_init_entropy(problem, select_pars=select_pars, pop=fit_options['pop'] * fit_options['steps'] / self.thinning, options=entropy_options)
 
-
-    def start_mapper(self) -> None:
-        # deprecated: the call to "self" in self.mapper really slows down multiprocessing
-        setattr(self.problem, 'calcQs', self.measQ)
-        setattr(self.problem, 'oversampling', self.oversampling)
-
-        self.mapper = MPMapper.start_mapper(self.problem, None, cpus=0)
-
-    def stop_mapper(self) -> None:
-        # terminates the multiprocessing mapper pool
-        MPMapper.pool.terminate()
-        
-        # allow start_mapper call again
-        MPMapper.pool = None
-
     def get_all_points(self, modelnum: Union[int, None]) -> List[DataPoint]:
         # returns all data points associated with model with index modelnum
         return [pt for step in self.steps for pt in step.points if pt.model == modelnum]
@@ -602,151 +582,6 @@ class SimReflExperiment(object):
 
         return scaled_foms
 
-    def _marginalization_efficiency(self, Qth, qprof, points):
-        """ Calculate the marginalization efficiency: the fraction of uncertainty in R(Q) that
-            arises from the marginal parameters.
-            
-            Used by calc_foms_cov
-            """
-
-        # define parameter numbers to select
-        marg_points = points[:,self.sel]
-
-        # Calculate the Jacobian matrix from a linear regression of the q-profiles against
-        # the parameters. Do this for all parameters and selected parameters.
-        # TODO: Calculate this once and then select the appropriate parameters
-        reg = LinearRegression(fit_intercept=True)
-        reg.fit(points/np.std(points, axis=0), qprof/np.std(qprof, axis=0))
-        reg_marg = LinearRegression(fit_intercept=True)
-        reg_marg.fit(marg_points[:,:]/np.std(marg_points[:,:], axis=0), qprof/np.std(qprof, axis=0))
-        J = reg.coef_.T
-        J_marg = reg_marg.coef_.T
-
-        # Calculate the covariance matrices for all and selected parameters
-        # TODO: Calculate this once and then select the appropriate parameters
-        covX = np.cov((points/np.std(points, axis=0)).T)
-        covX = np.array(covX, ndmin=2)
-        covX_marg = np.cov((marg_points/np.std(marg_points, axis=0)).T)
-        covX_marg = np.array(covX_marg, ndmin=2)
-
-        # Calculate the fraction of the total uncertainty that can be accounted for
-        # by the selected parameters
-        df2s = np.zeros_like(Qth)
-        df2s_marg = np.zeros_like(Qth)    
-        for j in range(len(Qth)):
-            Jj = J[:,j][:,None]
-            df2s[j] = np.squeeze(Jj.T @ covX @ Jj)
-
-            Jj = J_marg[:,j][:,None]
-            df2s_marg[j] = np.squeeze(Jj.T @ covX_marg @ Jj)
-
-        return df2s, df2s_marg, df2s_marg / df2s
-
-    def _smoothed_dR(self):
-        """ Estimate local dR by smoothing over neighboring points. Smoothing is done using a Gaussian kernel with width dQ.
-            Does NOT update dR from current data points.
-        
-        Returns:
-            all_smoothed_dR -- list of arrays with smoothed dR, one for each model. Each array is the same shape as dR.
-        
-        """
-
-        all_smoothed_dR = list()
-        for m in self.models:
-            Q, dR = m.fitness.probe.Q, m.fitness.probe.dR
-            smoothed_dR = list()
-            for Qi, dQi in zip(Q, m.fitness.probe.dQ):
-                kernel = 1./(2*np.pi*dQi**2) * np.exp(-(Q - Qi) ** 2 / (2 * dQi **2))
-                smoothed_dR.append(np.sum(dR * kernel / dR ** 2) / np.sum(kernel / dR ** 2))
-            all_smoothed_dR.append(np.array(smoothed_dR))
-
-        return all_smoothed_dR
-
-    def calc_foms_cov(self, step):
-        """Calculate figures of merit for each model, using a Jacobian/covariance matrix approach
-            Deprecated in favor of dHdt forecasting models
-
-        Inputs:
-        step -- the step to analyze. Assumes that the step has been fit so
-                step.draw and step.qprofs exist
-
-        Returns:
-        foms -- list of figures of merit (ndarrays), one for each model in self.problem
-        meastimes -- list of suggested measurement times at each Q value, one for each model
-        """
-
-        foms = list()
-        meas_times = list()
-        
-        # Cycle through models, with model-specific x, Q, calculated q profiles, and measurement background level
-        for mnum, (m, xs, Qth, qprof, qbkg, sdR) in enumerate(zip(self.models, self.x, self.measQ, step.qprofs, self.meas_bkg, self._smoothed_dR())):
-
-            # get the incident intensity for all x values
-            incident_neutrons = self.instrument.intensity(xs)
-
-            # define signal to background. For now, this is just a scaling factor on the effective rate
-            # reference: Hoogerheide et al. J Appl. Cryst. 2022
-            sbr = qprof / qbkg
-            refl = np.mean(qprof/(1+2/sbr), axis=0)
-            refl = np.maximum(refl, np.zeros_like(refl))
-
-            # q-dependent noise. Use the minimum of the actual spread in Q and the expected spread from the nearest points. 
-            # This can get stuck if the spread changes too rapidly, so dR is smoothed by dQ.
-            # TODO: Is this really the right thing to do? Should probably just be the actual spread; the problem is that if
-            # the spread doesn't constrain the variables very much, then we just keep measuring at the same point over and over.
-            minstd = np.min(np.vstack((np.std(qprof, axis=0), np.interp(Qth, m.fitness.probe.Q, sdR))), axis=0)
-            normrefl = refl * (minstd/np.mean(qprof, axis=0))**4
-
-            # Calculate marginalization efficiency
-            _, _, marg_eff = self._marginalization_efficiency(Qth, qprof, step.draw.points)
-
-            qfom_norm = marg_eff*normrefl
-
-            # Calculate figures of merit and proposed measurement times
-            fom = list()
-            meas_time = list()
-            old_meas_time = list()
-            for x, intens in zip(xs, incident_neutrons):
-                q = self.instrument.x2q(x)
-                #xrefl = intens * np.interp(q, Qth, refl * (minstd/np.mean(qprof, axis=0))**2)
-                # TODO: check this. Should it be the average of xrefl, or the sum?
-                #old_meas_time.append(np.mean((1-self.eta) / (self.eta**2 * xrefl)))
-
-                # calculate the figure of merit
-                fom.append(np.sum(intens * np.interp(q, Qth, qfom_norm)))
-
-            fom = np.array(fom)
-
-            # calculate the effective number of detectors. If only a few are lighting up, this will be close to 1,
-            # otherwise, if all the intensities are about the same, this will be close to the number of detectors
-            # TODO: Calculate this correctly. For CANDOR in monochromatic mode, this might break because the effective
-            # number of detectors is not 54, but 2 or 3. So just blindly taking all detectors is probably not correct.
-            # An appropriately weighted sum would probably be better.
-            effective_detectors = float(incident_neutrons.shape[1])
-            #print(f'effective detectors: {effective_detectors}')
-
-            for x, intens, ifom in zip(xs, incident_neutrons, fom):
-                q = self.instrument.x2q(x)
-                xrefl = intens * np.interp(q, Qth, refl * (minstd/np.mean(qprof, axis=0))**2)
-
-                # original calculation
-                old_meas_time.append(np.mean((1-self.eta) / (self.eta**2 * xrefl)))
-
-                # automatic eta determination
-                # sqrt is because the fom is proportional to (sigma ** 2) ** 2.
-                # Use self.eta as an upper limit to avoid negative 1 - eta
-                # Division by effective number of detectors accounts for simultaneous detection in
-                # multiple detectors
-                eta = min((np.mean(fom) / ifom) ** 0.5, self.eta)
-                eta = 1 - (1 - eta) / effective_detectors
-                meas_time.append(np.mean((1 - eta) / (eta ** 2 * xrefl)))
-
-            foms.append(fom)
-            meas_times.append(np.array(meas_time))
-            #print(np.vstack((xs, old_meas_time, meas_time)).T)
-
-        return foms, meas_times
-
     def _fom_from_draw(self, pts: np.ndarray,
                         qprofs: List[np.ndarray],
                         select_ci_level: float = 0.68,
@@ -956,174 +791,6 @@ class SimReflExperiment(object):
 
         return all_foms, all_meas_times, all_H0, all_new
 
-    def _dHdt(self, pts, qprofs, incident_neutrons, dR, resample=0, ci_level=0.68):
-        """ Calculate rate of change of entropy (dH/dt) for measuring at a given Q point
-            Deprecated in favor of _fom_from_draw, which uses numpy operations for speed.
-        
-        Inputs:
-        pts -- the parameter samples underlying each Q profile (nprof x npar array)
-        qprofs -- Q profiles (nprof x len(self.measQ[modelnum]) array)
-        incident_neutrons -- intensity (nQpoints array)
-        dR -- local estimate of data dR (nQpoints array) (not currently used)
-        resample -- attempt to find best point by resampling Q profiles and averaging entropy decrease.
-                    defaults to 0 (resampling off); use a nonzero integer for number of resamples (should
-                    be at least 10 but becomes computationally expensive as it grows)
-        ci_level -- confidence level at which to do the dH/dt calculation (not the measurement time calculation)
-        
-        Returns:
-        dHdt -- array of dH/dt values for each Q point in qprofs
-        ts -- array of measurement time values for each Q point in qprofs
-        """
-
-        eta = self.eta  # measure to specified level
-        zvalue = norm.interval(ci_level, loc=0, scale=1.0)[1]
-        #for _ in range(n_steps):
-        dH = list()
-        dHdt = list()
-        ddHdt = list()
-        ts = list()
-        goodidxs = list()
-        H0 = ar.calc_entropy(pts, select_pars=self.sel)
-
-        # initialize random number generator
-        rng = np.random.default_rng()
-
-        # cycle through all q values)
-        for idx, (intens, idR) in enumerate(zip(incident_neutrons, dR)):
-            
-            # extract distribution of q profiles
-            iqs = qprofs[:,idx]
-            iqs_sorted = np.sort(iqs)
-            
-            # calculate median and (eta x 100) CI
-            med, ci, ci1 = credible_interval(iqs_sorted, (0, eta, ci_level))
-            med = med[0]
-            eff_sigma = 0.5 * np.diff(ci1)[0]
-
-            # check that spread in sampled q profiles isn't significantly greater than spread in data 
-            if False: #eff_sigma > idR * zvalue:
-                # effective eta = 0.68 in this branch
-                meas_sigma = idR * zvalue
-            else:
-                meas_sigma = 0.5 * np.diff(ci)[0]
-
-            # estimate neutron flux (intens x med) and existing uncertainty
-            xrefl_meas = (intens * med * (meas_sigma / med) ** 2)
-            xrefl_select = (intens * med * (eff_sigma / med) ** 2)
-
-            # estimate measurement time to equal standard deviation of a gaussian with this CI
-            #meastime = (1-eta) / (eta**2 * xrefl)
-            meastime = 1.0 / xrefl_meas
-            selecttime = 1.0 / xrefl_select
-
-            if resample == 0:
-                # if not resampling, just take all curves in the specified confidence interval
-                crit = (iqs > ci1[0]) & (iqs < ci1[1])
-                r1idxs = np.arange(len(crit))[crit]
-                if False:
-                    iHs = list()
-                    for _ in range(100):
-                        iidx = rng.choice(r1idxs, size=int(len(r1idxs)), replace=True)
-                        iHs.append(ar.calc_entropy(pts[iidx, :], select_pars=self.sel))
-                    iH = np.mean(iHs)
-                    diH = np.std(iHs)
-                else:
-                    iH = ar.calc_entropy(pts[r1idxs, :], select_pars=self.sel)
-                    diH = 0.0
-
-            else:
-                # calculate probability density of new distribution
-                p = (2 * np.pi * meas_sigma ** 2) ** -0.5 * np.exp(-(iqs_sorted - med) ** 2 / (2 * meas_sigma ** 2))
-
-                # perform resampling
-                iHs = list()
-                for _ in range(int(resample)):
-                    # resample original curves
-                    r1idxs = rng.choice(np.arange(len(iqs_sorted)), size=len(iqs_sorted), p=p/np.sum(p))
-                    r1idxs = np.unique(r1idxs)
-                    
-                    # select corresponding parameter values
-                    newpts = pts[r1idxs, :]
-
-                    # calculate marginalized entropy of selected points
-                    iH = ar.calc_entropy(newpts, select_pars=self.sel)
-
-                    iHs.append(iH)
-                iH = np.mean(iHs)
-                diH = np.std(iHs)
-
-            # calculate differential entropy from initial state
-            dH.append(H0 - iH)
-            dHdt.append((H0 - iH) / selecttime)
-            ddHdt.append(diH / selecttime)
-            ts.append(meastime)
-            goodidxs.append(r1idxs)
-        
-        # selection (vestigial if n_steps == 1, used if doing multiple forecasting)
-        #maxidx = np.where(dHdt==np.max(dHdt))[0][0]
-        #goodidx = goodidxs[maxidx]
-        #pts = pts[goodidx,:]
-        #qprofs = qprofs[goodidx,:]
-
-        return np.array(dHdt), np.array(ddHdt), np.array(ts)
-
-    def calc_foms(self, step):
-        """Calculate figures of merit for each model, using sampled R(Q) to predict maximum deltaH in time
-            (Note: deprecated in favor of forecasting models)
-
-        Inputs:
-        step -- the step to analyze. Assumes that the step has been fit so
-                step.draw and step.qprofs exist
-
-        Returns:
-        foms -- list of figures of merit (ndarrays), one for each model in self.problem
-        meastimes -- list of suggested measurement times at each Q value, one for each model
-        """
-
-        foms = list()
-        meas_times = list()
-        pts = step.draw.points
-        # Cycle through models, with model-specific x, Q, calculated q profiles, and measurement background level
-        for mnum, (m, xs, Qth, qprof, qbkg, sdR) in enumerate(zip(self.models, self.x, self.measQ, step.qprofs, self.meas_bkg, self._smoothed_dR())):
-
-            # get the incident intensity for all x values
-            incident_neutrons = self.instrument.intensity(xs)
-
-            # define signal to background. For now, this is just a scaling factor on the effective rate
-            # reference: Hoogerheide et al. J Appl. Cryst. 2022
-            sbr = qprof / qbkg
-            refl = qprof/(1+2/sbr)
-            refl = np.clip(refl, a_min=0, a_max=None)
-
-            interp_refl = interp1d(Qth, refl, axis=1, fill_value=(refl[:,0], refl[:,-1]), bounds_error=False)
-            interp_refl_std = interp1d(m.fitness.probe.Q, sdR, fill_value=(sdR[0], sdR[-1]), bounds_error=False)
-            
-
-            # Calculate figures of merit and proposed measurement times
-            fom = list()
-            meas_time = list()
-            for x, intens in zip(xs, incident_neutrons):
-                q = np.squeeze(self.instrument.x2q(x))
-                #xrefl = intens * np.interp(q, Qth, refl * (minstd/np.mean(qprof, axis=0))**2)
-                # TODO: check this. Should it be the average of xrefl, or the sum?
-                #old_meas_time.append(np.mean((1-self.eta) / (self.eta**2 * xrefl)))
-                
-                # calculate the figure of merit
-                xqprof = np.array(interp_refl(q))
-                if xqprof.ndim == 1:
-                    xqprof = xqprof[:,None]
-                
-                xrefl_std = np.array(interp_refl_std(q), ndmin=1)
-                
-                idHdt, iddHdt, its = self._dHdt(pts, xqprof, intens, xrefl_std)
-                fom.append(np.sum(idHdt - iddHdt))
-                meas_time.append(1./np.sum(1./its))
-
-            foms.append(np.array(fom))
-            meas_times.append(np.array(meas_time))
-
-        return foms, meas_times
-
     def _find_fom_maxima(self, scaled_foms: List[np.ndarray],
                          start: int = 0) -> List[Tuple[float, int, int]]:
         """Finds all maxima in the figure of merit, including the end points
@@ -1208,7 +875,7 @@ class SimReflExperiment(object):
         
         return DataPoint(newx, new_meastime, mnum, (T, dT, L, dL, N[0], Nbkg[0], Ninc[0]), merit=maxfom)
 
-    def select_new_point(self, step, start=0):
+    def select_new_point(self, step: ExperimentStep, start: int = 0) -> Union[DataPoint, None]:
         """ (Deprecated) Find a single new point to measure from the figure of merit
         
         Inputs:
@@ -1236,7 +903,7 @@ class SimReflExperiment(object):
 
             return None
 
-    def save(self, fn):
+    def save(self, fn) -> None:
         """Save a pickled version of the experiment"""
 
         for step in self.steps[:-2]:
@@ -1246,7 +913,7 @@ class SimReflExperiment(object):
             dill.dump(self, f, recurse=True)
 
     @classmethod
-    def load(cls, fn):
+    def load(cls, fn) -> None:
         """ Load a pickled version of the experiment
         
         Usage: <variable> = SimReflExperiment.load(<filename>)
