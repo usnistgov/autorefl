@@ -1,15 +1,13 @@
-#%%
 import datetime
 import numpy as np
 import copy
 import os
 from bumps.cli import load_model
 import matplotlib.pyplot as plt
-from simexp import SimReflExperiment, SimReflExperimentControl, makemovie
+from simexp import SimReflExperiment, SimReflExperimentControl
+from analysis import makemovie
 import instrument
 import argparse
-#import imageio
-#import skvideo.io
 
 plt.rcParams['lines.linewidth'] = 1.5
 plt.rcParams['lines.markersize'] = 1.5
@@ -78,7 +76,6 @@ if __name__ == '__main__':
         os.mkdir(pathname)
         #fn = './' + fn + fsuffix + '/' + fn
 
-        #%%
         # define calculation probe from model file (runs calculation for all models in model file)
         modelfile = args.model
         model = load_model(modelfile)
