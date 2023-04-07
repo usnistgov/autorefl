@@ -5,7 +5,7 @@ Framework for driving neutron autonomous reflectometry experiments. The overarch
 
 ## Background
 
-Neutron reflectometry measurements involve measuring the reflection of neutrons from structured interfaces. Measurements involve measuring a 1-D curve, $R(Q)$. For a general reflectometer, the 1-D measurement coordinate is a general coordinate $x$ with a transformation from $x \rArr Q$ (sometimes multiple $Q$ values per $x$).
+Neutron reflectometry measurements involve measuring the reflection of neutrons from structured interfaces. Measurements involve measuring a 1-D curve, $R(Q)$. For a general reflectometer, the 1-D measurement coordinate is a general coordinate $x$ with a transformation from $x$ &rarr; $Q$ (sometimes multiple $Q$ values per $x$).
 
 ## List of important files
 simexp.py -- library containing SimReflExperiment, SimReflExperimentControl, and data structures
