@@ -755,7 +755,7 @@ class SimReflExperiment(object):
                         allow_repeat: bool = True) -> Tuple[List[List[np.ndarray]],
                                                             List[List[np.ndarray]],
                                                             List[float],
-                                                            List[List[int, int, float, float]]]:
+                                                            List[Tuple[int, int, float, float]]]:
         """ Calculate figure of merit from a set of draw points and associated q profiles
         
             Inputs:
@@ -1125,7 +1125,7 @@ class SimReflExperiment(object):
         return foms, meas_times
 
     def _find_fom_maxima(self, scaled_foms: List[np.ndarray],
-                         start: int = 0) -> List[List[float, int, int]]:
+                         start: int = 0) -> List[Tuple[float, int, int]]:
         """Finds all maxima in the figure of merit, including the end points
         
             Inputs:
@@ -1266,14 +1266,29 @@ class SimReflExperimentControl(SimReflExperiment):
     
     Subclasses SimReflExperiment.
 
-    New input:
+    Additional input:
     model_weights -- a vector of weights, with length equal to number of problems
                     in self.problem. Scaled by the sum.
-    NOTE: a fixed $Q^2$ weighting is additionally applied to each Q point
+    NOTE: an instrument-defined default weighting is additionally applied to each Q point
     """
 
-    def __init__(self, problem, Q, model_weights=None, instrument=instrument.MAGIK(), eta=0.8, npoints=1, switch_penalty=1, bestpars=None, fit_options=fit_options, entropy_options=default_entropy_options, oversampling=11, meas_bkg=0.000001, startmodel=0, min_meas_time=10, select_pars=None) -> None:
-        super().__init__(problem, Q, instrument=instrument, eta=eta, npoints=npoints, switch_penalty=switch_penalty, bestpars=bestpars, fit_options=fit_options, entropy_options=entropy_options, oversampling=oversampling, meas_bkg=meas_bkg, startmodel=startmodel, min_meas_time=min_meas_time, select_pars=select_pars)
+    def __init__(self, problem: FitProblem,
+                       Q: Union[np.ndarray, List[np.ndarray]],
+                       model_weights: Union[List[float], None] = None,
+                       instrument: instrument.ReflectometerBase = instrument.MAGIK(),
+                       eta: float = 0.68,
+                       npoints: int = 1,
+                       switch_penalty: float = 1.0,
+                       switch_time_penalty: float = 0.0,
+                       bestpars: Union[np.ndarray, list, None] = None,
+                       fit_options: dict = fit_options,
+                       entropy_options: dict = default_entropy_options,
+                       oversampling: int = 11,
+                       meas_bkg: Union[float, List[float]] = 1e-6,
+                       startmodel: int = 0,
+                       min_meas_time: float = 10.0,
+                       select_pars: Union[list, None] = None) -> None:
+        super().__init__(problem, Q, instrument=instrument, eta=eta, npoints=npoints, switch_penalty=switch_penalty, switch_time_penalty=switch_time_penalty, bestpars=bestpars, fit_options=fit_options, entropy_options=entropy_options, oversampling=oversampling, meas_bkg=meas_bkg, startmodel=startmodel, min_meas_time=min_meas_time, select_pars=select_pars)
 
         if model_weights is None:
             model_weights = np.ones(self.nmodels)
@@ -1287,10 +1302,10 @@ class SimReflExperimentControl(SimReflExperiment):
             f = self.instrument.meastime(x, weight)
             self.meastimeweights.append(f)
 
-    def take_step(self, total_time):
+    def take_step(self, total_time: float) -> None:
         r"""Overrides SimReflExperiment.take_step
         
-        Generates a simulated reflectivity curve based on $Q^2$-scaled
+        Generates a simulated reflectivity curve based on weighted / scaled
         measurement times.
         """
 
