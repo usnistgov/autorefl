@@ -1,7 +1,7 @@
 background ch061 3.52929196863132e-07
 intensity ch061 0.98851603201294
-sample_broadening ch061 0.00131708047428161
-theta_offset ch061 -0.00854163903933225
+sample_broadening ch061 0.00
+theta_offset ch061 0.00
 siox interface 3.35816986933215
 siox rho 3.27838041393619
 siox thickness 10.344499034874

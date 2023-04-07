@@ -4,7 +4,7 @@ import sys
 # append path to your molgroups, or just link molgroups to your same directory
 sys.path.append('')
 import numpy as np
-from molgroups import PC, ssBLM
+from molgroups_local import PC, ssBLM
 import components as cmp
 from refl1d.names import load4, Parameter, SLD, Slab, Stack, Experiment, FitProblem
 from refl1d.flayer import FunctionalProfile

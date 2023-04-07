@@ -1,0 +1,16 @@
+background ch061 3.52929196863132e-08
+intensity ch061 0.98851603201294
+sample_broadening ch061 0.00
+theta_offset ch061 0.00
+siox interface 3.35816986933215
+siox rho 3.27838041393619
+siox thickness 10.344499034874
+tiox rho 2.26952407737802
+d2o rho 5.89279480487816
+tiox roughness 3.26567530736685
+inner acyl chain thickness 14.3881420762318
+outer acyl chain thickness 11.6114232490578
+submembrane thickness 13.9379893879479
+bilayer roughness 5.27042234998746
+volume fraction bilayer 0.936728134257974
+total tiox thickness 135.458838270078
