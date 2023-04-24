@@ -6,8 +6,9 @@ import matplotlib.pyplot as plt
 from matplotlib import cm, colors
 from matplotlib.figure import Figure
 from matplotlib.axis import Axis
-from matplotlib.colors import Color
 from matplotlib.gridspec import GridSpec
+
+Color = Union[Tuple[float, float, float] , str]
 
 import autorefl as ar
 from simexp import SimReflExperiment, SimReflExperimentControl, ExperimentStep, data_tuple
