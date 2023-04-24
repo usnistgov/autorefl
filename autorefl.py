@@ -5,20 +5,6 @@ from reflred.candor import edges, _rebin_bank
 from reflred.refldata import ReflData, Sample, Detector, Monochromator
 import dataflow.lib.err1d as err1d
 
-spec = np.loadtxt('calibration/magik_specular_hw106.dat', usecols=[31, 26, 5], skiprows=9, unpack=False)
-qs, s1s, ares = np.delete(spec, 35, 0).T
-qs, s1s, ares = spec.T
-
-wv = 5.0
-dwv = 0.01648374 * wv
-pres = np.polyfit(qs, ares, 1)
-
-def q2a(q, L):
-    return np.degrees(np.arcsin(np.array(q)*L/(4*np.pi)))
-
-def a2q(T, L):
-    return 4*np.pi/L * np.sin(np.radians(T))
-
 def sim_data_N(R, incident_neutrons, addnoise=True, resid_bkg=0, meas_bkg=0):
     R = np.array(R, ndmin=1)
     _bR = np.ones_like(R)*(meas_bkg - resid_bkg)*incident_neutrons
@@ -27,15 +13,6 @@ def sim_data_N(R, incident_neutrons, addnoise=True, resid_bkg=0, meas_bkg=0):
     bN = poisson.rvs(_bR, size=_bR.shape)
 
     return N, bN, incident_neutrons
-
-def gen_new_variables(newQ):
-    Q = np.array(newQ, ndmin=1)
-    T = q2a(Q, wv)
-    dT = np.polyval(pres, Q)
-    L = wv
-    dL = dwv
-    
-    return T, dT, L, dL
 
 def calc_expected_R(fitness, T, dT, L, dL, oversampling=None, resolution='normal'):
     # currently requires sorted values (by Q) because it returns sorted values.

@@ -342,8 +342,23 @@ class SimReflExperiment(object):
 
         # generate an initial population and calculate the associated q-profiles
         initpts = generate(self.problem, init='lhs', pop=self.fit_options['pop'], use_point=False)
-        init_qprof, _ = ar.calc_qprofiles(self.problem, initpts, newQs)
-    
+
+        # Set attributes of "problem" for passing into multiprocessing routines
+        newvars = [self.instrument.Q2TdTLdL(nQ, mx, mQ) for nQ, mQ, mx in zip(newQs, self.measQ, self.x)]
+        setattr(self.problem, 'calcTdTLdL', newvars)
+        setattr(self.problem, 'oversampling', self.oversampling)
+        setattr(self.problem, 'resolution', self.instrument.resolution)
+
+        # Start multiprocessing mapper
+        mapper = MPMapper.start_mapper(self.problem, None, cpus=0)
+
+        init_qprof = self.calc_qprofiles(initpts)
+
+        # Terminate the multiprocessing pool (required to avoid memory issues
+        # if run is stopped after current fit step)
+        MPMapper.stop_mapper(mapper)
+        MPMapper.pool = None
+
         points = []
 
         # simulate data based on the q profiles. The uncertainty in the parameters is estimated
@@ -365,7 +380,7 @@ class SimReflExperiment(object):
             # Calculate T, dT, L, dL. Note that because these data don't constrain the model at all,
             # these values are brought in from MAGIK (not instrument-specific) because they don't need
             # to be.
-            Ts = ar.q2a(newQ, 5.0)
+            Ts = instrument.q2a(newQ, 5.0)
             # Resolution function doesn't matter here at all because these points don't have any effect
             dTs = np.polyval(np.array([ 2.30358547e-01, -1.18046955e-05]), newQ)
             Ls = np.ones_like(newQ)*5.0
@@ -391,9 +406,11 @@ class SimReflExperiment(object):
         self.problem.model_reset()
         self.problem.chisq_str()
 
-    def calc_qprofiles(self, drawpoints: np.ndarray, mappercalc) -> np.ndarray:
+    def calc_qprofiles(self, drawpoints: np.ndarray) -> np.ndarray:
+        # NOTE: must have MPMapper started before calling this!!
+        mappercalc = lambda points: MPMapper.pool.map(_MP_calc_qprofile, ((MPMapper.problem_id, p) for p in points))
+
         # q-profile calculator using multiprocessing for speed
-        # this version is limited to calculating profiles with measQ, cannot be used with initial calculation
         res = mappercalc(drawpoints)
 
         # condition output of mappercalc to a list of q-profiles for each model
@@ -410,13 +427,13 @@ class SimReflExperiment(object):
         self.update_models()
 
         # Set attributes of "problem" for passing into multiprocessing routines
-        setattr(self.problem, 'calcQs', self.measQ)
+        newvars = [self.instrument.Q2TdTLdL(mQ, mx, mQ) for mQ, mx in zip(self.measQ, self.x)]
+        setattr(self.problem, 'calcTdTLdL', newvars)
         setattr(self.problem, 'oversampling', self.oversampling)
         setattr(self.problem, 'resolution', self.instrument.resolution)
 
         # initialize mappers for Dream fit and for Q profile calculations
         mapper = MPMapper.start_mapper(self.problem, None, cpus=0)
-        mappercalc = lambda points: MPMapper.pool.map(_MP_calc_qprofile, ((MPMapper.problem_id, p) for p in points))
 
         # set output stream
         if outfid is not None:
@@ -451,7 +468,7 @@ class SimReflExperiment(object):
         # Calculate the Q profiles associated with posterior distribution
         print('Calculating %i Q profiles:' % (step.draw.points.shape[0]))
         init_time = time.time()
-        step.qprofs = self.calc_qprofiles(step.draw.points, mappercalc)
+        step.qprofs = self.calc_qprofiles(step.draw.points)
         print('Calculation time: %f' % (time.time() - init_time))
 
         # Terminate the multiprocessing pool (required to avoid memory issues
@@ -1019,16 +1036,15 @@ def _calc_qprofile(calcproblem, point):
     Inputs:
     calcproblem -- a bumps.BaseFitProblem or bumps.MultiFitProblem, prepopulated
                     with attributes:
-                        calcQs (same as SimReflExperiment.measQ);
+                        calcTdTLdL (derived from SimReflExperiment.measQ via Q2TdTLdL);
                         oversampling
                         resolution (either 'normal' or 'uniform', instrument-dependent)
     point -- parameter vector
     """
     
     mlist = [calcproblem] if hasattr(calcproblem, 'fitness') else list(calcproblem.models)
-    newvars = [ar.gen_new_variables(Q) for Q in calcproblem.calcQs]
     qprof = list()
-    for m, newvar in zip(mlist, newvars):
+    for m, newvar in zip(mlist, calcproblem.calcTdTLdL):
         calcproblem.setp(point)
         calcproblem.chisq_str()
         Rth = ar.calc_expected_R(m.fitness, *newvar, oversampling=calcproblem.oversampling, resolution=calcproblem.resolution)

@@ -1,8 +1,14 @@
 import numpy as np
 import json
 import warnings
-from autorefl import q2a, a2q
+from reflred.candor import edges
 from reflred.resolution import divergence
+
+def q2a(q, L):
+    return np.degrees(np.arcsin(np.array(q)*L/(4*np.pi)))
+
+def a2q(T, L):
+    return 4*np.pi/L * np.sin(np.radians(T))
 
 class ReflectometerBase(object):
     def __init__(self) -> None:
@@ -68,6 +74,61 @@ class ReflectometerBase(object):
     def dL(self, x):
         
         return np.array(np.ones_like(x) * self._dL, ndmin=1)
+
+    def Q2TdTLdL(self, qs, measx, measQ):
+        """
+        Converts a Q value into T, dT, L, dL variables.
+        Replaces gen_new_variables. Used for calculating R(Q) profiles
+        Logic derived from reflred.candor._rebin_bank
+
+        Inputs:
+        qs -- Q values to convert to variables
+        measx -- possible x values
+        measQ -- possible Q bins
+
+        Returns:
+        T -- average angle over all measx, one for each value of qs
+        dT -- average angular divergence
+        L -- average wavelength
+        dL -- average wavelength spread
+        """
+
+        # calculate all variables
+        _Q = self.x2q(measx)
+        _T = self.T(measx)
+        _dT = self.dT(measx)
+        _L = self.L(measx)
+        _dL = self.dL(measx)
+
+        # calculate q bin edges
+        q_edges = edges(measQ, extended=True)
+        nbins = len(q_edges) - 1
+
+        # calculate flattened bin index
+        bin_index = np.searchsorted(q_edges, _Q).ravel() - 1
+
+        # calculate normalization factor
+        sum_w = np.bincount(bin_index, minlength=nbins)
+        sum_w += (sum_w == 0)  # protect against divide by zero
+
+        # Combine wavelengths
+        sum_L = np.bincount(bin_index, weights=_L.ravel(), minlength=nbins)
+        sum_dLsq = np.bincount(bin_index, weights=(_dL.ravel()**2+_L.ravel()**2), minlength=nbins)
+        bar_L = sum_L/sum_w
+        bar_dL = np.sqrt(sum_dLsq/sum_w - (sum_L/sum_w)**2)
+
+        # Combine angles
+        sum_T = np.bincount(bin_index, weights=_T.ravel(), minlength=nbins)
+        sum_dT = np.bincount(bin_index, weights=_dT.ravel()**2, minlength=nbins)
+        bar_T = sum_T/sum_w
+        bar_dT = np.sqrt(sum_dT/sum_w)
+
+        # find indices corresponding to requested values and return results
+        idxs = np.searchsorted(measQ, qs) + 1
+        #res = [(bar_T[idx], bar_dT[idx], bar_L[idx], bar_dL[idx]) for idx in idxs]
+
+        return (bar_T[idxs], bar_dT[idxs], bar_L[idxs], bar_dL[idxs])
+
 
     def get_slits(self, x):
         x = np.array(x, ndmin=1)
