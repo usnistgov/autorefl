@@ -992,22 +992,14 @@ class SimReflExperimentControl(SimReflExperiment):
         """
 
         points = list()
-        #TODO: Make this into a (Q to points) function
-        for mnum, (newx, mtimeweight, meas_bkg, resid_bkg) in enumerate(zip(self.x, self.meastimeweights, self.meas_bkg, self.resid_bkg)):
 
-            Ts = self.instrument.T(newx)
-            dTs = self.instrument.dT(newx)
-            Ls = self.instrument.L(newx)
-            dLs = self.instrument.dL(newx)
-            #print(T, dT, L, dL)
-            incident_neutrons = self.instrument.intensity(newx)
-            for x, t, T, dT, L, dL, intens in zip(newx, total_time * mtimeweight, Ts, dTs, Ls, dLs, incident_neutrons):
-                calcR = ar.calc_expected_R(self.calcmodels[mnum].fitness, T, dT, L, dL, oversampling=self.oversampling, resolution='normal')
-            #print('expected R:', calcR)
-                N, Nbkg, Ninc = ar.sim_data_N(calcR, intens.T * t, resid_bkg=resid_bkg, meas_bkg=meas_bkg)
-                points.append(DataPoint(x, t, mnum, (T, dT, L, dL, N, Nbkg, Ninc), movet=self.instrument.movetime(x)[0]))
-                self.instrument.x = x
-        
+        for mnum, (newx, mtimeweight) in enumerate(zip(self.x, self.meastimeweights)):
+            for x, t in zip(newx, total_time * mtimeweight):
+                pt = self._generate_new_point(mnum, x, t, None)
+                pt.movet = self.instrument.movetime(x)[0]
+                points.append(pt)
+                self.instrument.x = x    
+
         self.add_step(points)
 
 def _MP_calc_qprofile(problem_point_pair):
