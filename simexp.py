@@ -2,7 +2,7 @@ import numpy as np
 import copy
 import time
 import dill
-from typing import Tuple, Union, List
+from typing import Tuple, Union, List, TypeVar, Type
 
 from bumps.fitters import ConsoleMonitor, _fill_defaults, StepMonitor
 from bumps.initpop import generate
@@ -22,6 +22,8 @@ data_tuple = Tuple[Union[np.ndarray, list], Union[np.ndarray, list],
                                    Union[np.ndarray, list], Union[np.ndarray, list],
                                    Union[np.ndarray, list], Union[np.ndarray, list],
                                    Union[np.ndarray, list]]
+
+_T = TypeVar("_T")
 
 class DataPoint(object):
     """ Container object for a single data point.
@@ -928,7 +930,7 @@ class SimReflExperiment(object):
             dill.dump(self, f, recurse=True)
 
     @classmethod
-    def load(cls, fn) -> None:
+    def load(cls: Type[_T], fn) -> _T:
         """ Load a pickled version of the experiment
         
         Usage: <variable> = SimReflExperiment.load(<filename>)
