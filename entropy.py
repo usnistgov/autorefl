@@ -1,3 +1,5 @@
+"""Tools for entropy calculation"""
+
 import numpy as np
 from bumps.initpop import generate
 
@@ -5,6 +7,8 @@ default_entropy_options = {'method': 'mvn_fast', 'scale': False}
 
 def gmm_entropy(points, n_est=None, n_components=None, covariance_type='full', predictor=None):
     r"""
+    Modified from the bumps.entropy module:
+
     Use sklearn.mixture.BayesianGaussianMixture to estimate entropy.
 
     *points* are the data points in the sample.
@@ -73,17 +77,21 @@ def gmm_entropy(points, n_est=None, n_components=None, covariance_type='full', p
 def calc_entropy(pts, select_pars=None, options=default_entropy_options, predictor=None):
     """Function for calculating entropy
 
-        Inputs:
-        pts -- N (number of samples) x P (number of parameters) array, e.g. from MCMCDraw.points
+    Args:
+        pts (np.ndarray): N (number of samples) x P (number of parameters) array, e.g. from MCMCDraw.points
             OR N x P x D, where D is a number of entropy values to be calculated in parallel
-        select_pars -- if None, all parameters are used; otherwise a list or array of parameter indices to use
-                        for marginalization
-        method -- 'mvn' (multivariate normal) or 'gmm' (gaussian mixture model)
-        predictor -- predictor (used only for gmm)
-        warm_start -- used only for gmm
+        select_pars (List[int] | None, optional): if None, all parameters are used; otherwise a list or array of parameter indices to use
+                        for marginalization. Defaults to None
+        options (dict, optional): method-specific options for the entropy calculation.
+            Defaults to default_entropy options. Must have at least the 'method' field, which
+            is one of 'mvn_fast', 'mvn', 'gmm'.
+        predictor (sklearn.mixture.BayesianGaussianMixture | None, optional):
+            predictor (used only for GMM entropy). Defaults to None (GMM will create one.)
 
-        Returns:
-        H -- MVN entropy (marginalized if select_pars is not None) of pts
+    Returns:
+        np.ndarray: Entropy (marginalized if select_pars is not None) of pts
+        np.ndarray | None: estimate of error in entropy (gmm only, else None)
+        sklearn.mixture.BayesianGaussianMixture | None: updated predictor (gmm only, else None)
 
     """
 
@@ -164,5 +172,20 @@ def calc_entropy(pts, select_pars=None, options=default_entropy_options, predict
     return np.squeeze(Hs), np.squeeze(dHs), predictor
 
 def calc_init_entropy(problem, pop, select_pars=None, options=default_entropy_options):
-    #pop = fit_params['pop'] * fit_params['steps'] / thinning
+    """Calculate initial entropy with a generated population of points
+
+    Args:
+        problem (refl1d.names.FitProblem): problem to use for generating initial population
+        pop (int): population size
+        select_pars (List[int] | None, Optional): if None, all parameters are used; otherwise a list or array of parameter indices to use
+                            for marginalization. Defaults to None
+        options (dict, optional): method-specific options for the entropy calculation.
+                Defaults to default_entropy options. Must have at least the 'method' field, which
+                is one of 'mvn_fast', 'mvn', 'gmm'.
+
+    Returns:
+        np.ndarray: Entropy (marginalized if select_pars is not None) of pts
+        np.ndarray | None: estimate of error in entropy (gmm only, else None)
+        sklearn.mixture.BayesianGaussianMixture | None: updated predictor (gmm only, else None)
+    """
     return calc_entropy(generate(problem, init='random', pop=pop, use_point=False), select_pars=select_pars, options=options)

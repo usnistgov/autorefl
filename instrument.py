@@ -1,3 +1,5 @@
+"""Reflectometry instrument definitions"""
+
 import numpy as np
 import json
 import warnings
@@ -11,6 +13,7 @@ def a2q(T, L):
     return 4*np.pi/L * np.sin(np.radians(T))
 
 class ReflectometerBase(object):
+    """Base reflectometer"""
     def __init__(self) -> None:
         self._L = None
         self._dL = None
@@ -291,7 +294,7 @@ class CANDOR(ReflectometerBase):
         self._L = wvcal[:,0]
         self._dL = wvcal[:,1]
 
-        # load intensity calibration
+        # load intensity calibration (same used for both banks for simulation purposes)
         with open('calibration/flowcell_d2o_r12_2_5_maxbeam_60_qoverlap0_751388_unpolarized_intensity.json', 'r') as f:
             d = json.load(f)
         

@@ -184,6 +184,8 @@ if __name__ == '__main__':
             for kk in range(args.nrepeats):
                 exp = SimReflExperiment(model, measQ, instrument=instr, eta=args.eta, fit_options=fit_options, oversampling=args.oversampling, bestpars=bestp, select_pars=sel, meas_bkg=meas_bkg, switch_penalty=args.penalty, npoints=args.npoints, entropy_options=entropy_options)
                 exp.switch_time_penalty = args.timepenalty # takes time to switch models
+
+                # Generate appropriate x vectors depending on the instrument
                 if args.instrument == 'MAGIK':
                     exp.x = exp.measQ
                 elif args.instrument == 'CANDOR':
@@ -201,18 +203,30 @@ if __name__ == '__main__':
                         x = np.array(x)
                         exp.x[i] = x
 
+                # add the initial step
                 exp.add_initial_step()
+
+                # run the simulation until the maximum simulation time is reached
                 total_t = 0.0
                 k = 0
                 while total_t < args.maxtime:
                     total_t += exp.steps[-1].meastime() + exp.steps[-1].movetime()
                     print('Rep: %i, Step: %i, Total time so far: %0.1f' % (kk, k, total_t))
+                    
+                    # fit the previous step
                     exp.fit_step()
-                    #exp.instrument.x = None # to turn off movement penalty
+
+                    # to turn off movement penalty
+                    #exp.instrument.x = None
+
+                    # take the next step
                     exp.take_step(allow_repeat=False)
+
+                    # save the simulation
                     exp.save(pathname + '/exp%i.pickle' % kk)
                     k += 1
 
+                # make a movie
                 if not args.nomovie:
                     try:
                         makemovie(exp, pathname + '/exp%i' % kk, fmt='gif', fps=3)
@@ -222,7 +236,7 @@ if __name__ == '__main__':
 
         # control measurement
         else:
-            # meastimes
+            # generate the appropriate number of measurement times
             meastimes = np.diff(np.insert(np.logspace(1, np.log10(args.maxtime), args.nctrlpts, endpoint=True), 0, 0))
 
             # condition model weights
@@ -234,6 +248,8 @@ if __name__ == '__main__':
 
             for kk in range(args.nrepeats):
                 exp = SimReflExperimentControl(model, measQ, instrument=instr, model_weights=model_weights, eta=args.eta, fit_options=fit_options, oversampling=args.oversampling, bestpars=bestp, select_pars=sel, meas_bkg=meas_bkg, entropy_options=entropy_options)
+
+                # Generate appropriate x vectors depending on the instrument
                 if args.instrument == 'CANDOR':
                     for i, measQ in enumerate(exp.measQ):
                         x = list()
@@ -257,13 +273,20 @@ if __name__ == '__main__':
 
                     print(exp.x, len(exp.x[0]))
 
+                # run the simulation once for each measurement time
                 total_t = 0.0
                 k = 0
                 for meastime in meastimes:
+
+                    # take a step
                     exp.take_step(meastime)
                     total_t += exp.steps[-1].meastime() + exp.steps[-1].movetime()
                     print('Rep: %i, Step: %i, Total time so far: %0.1f' % (kk, k, total_t))
+
+                    # fit the previous step
                     exp.fit_step()
+
+                    # save the result
                     exp.save(pathname + '/expctrl%i.pickle' % kk)
                     k += 1
 

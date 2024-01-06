@@ -1,3 +1,9 @@
+"""Makes a movie from a simulated experiment with a control experiment. (Default movie created
+    after a simulation does not include the control curve.)
+    
+    Args:
+        <experiment pickle file> <control experiment pickle file (optional)>"""
+
 import sys
 import os
 from simexp import SimReflExperiment, SimReflExperimentControl

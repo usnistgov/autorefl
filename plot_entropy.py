@@ -1,3 +1,42 @@
+""" Command line interface for plotting simulated reflectometry measurements
+
+Example:
+python runauto_cli.py ssblm.py --pars ssblm_tosb0.par --name both_forecast_q025
+    --sel 10 11 12 13 14 --eta 0.50 --meas_bkg 3e-6 3e-5 --maxtime 43.2e3 --burn 1000 --steps 500
+    --pop 8 --instrument MAGIK --qmax 0.25 --qstep_max 0.0024
+
+Required arguments:
+
+experiments (str): a space-delimited list of experiment folders or pickle files (wildcards allowed and
+                will be combined)
+
+# time scale to use in plot ('linear' or 'log')
+parser.add_argument('--tscale', type=str, default='log', choices=['linear', 'log'])
+
+# smallest time to use for comparing speedup
+parser.add_argument('--min_time', type=float, default=1e3)
+
+#
+parser.add_argument('--labels', type=str, nargs='+')
+parser.add_argument('--combine', action='store_true')
+parser.add_argument('--savename', type=str, nargs='+', default=[])
+
+Optional arguments:
+
+--control (str, optional): one control or set of controls (wildcards are allowed), which will be automatically averaged
+
+--tscale (str): time scale to use in plot ('linear' or 'log')
+
+--min_time (float): smallest time to use for comparing speedup, default 1e3 seconds
+
+--labels (str, optional): labels for plotting, one for each experiment. Control will be labeled 'control'.
+
+--combine (bool): if True, combine experiments, otherwise plot separately
+
+--savename (str): space-delimited list of file names (with extension to signal type) in which
+    to save the plots
+"""
+
 import numpy as np
 import glob
 import matplotlib.pyplot as plt
@@ -107,7 +146,12 @@ def load_path(exppath):
     return explist
 
 def plot_entropy(tscale=None, min_time=None, control=None, experiments=[], labels=None, combine=False, savename=[]):
-    # TODO: Add documentation!!
+    """Plots a figure containing two rows, one for the marginalized entropy (top) and the total
+        entropy (bottom). If a control is specified, creates a second column showing the speed-up
+        relative to the control for each case.
+
+        Returns the figure and all axes.
+    """
     
     tscale = tscale
     min_t_av = min_time

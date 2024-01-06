@@ -1,3 +1,5 @@
+"""Tools for analyzing simulated AutoRefl experiments"""
+
 import numpy as np
 import copy
 from typing import Union, List, Tuple
@@ -15,6 +17,16 @@ from simexp import SimReflExperiment, SimReflExperimentControl, ExperimentStep, 
 
 
 def get_steps_time(steps: List[ExperimentStep], control: bool = False) -> np.ndarray:
+    """Finds the total time associated a list of steps, depending on whether or not 
+        it was a control experiment
+
+    Args:
+        steps (List[ExperimentStep]): list of steps for which to calculate timing
+        control (bool, optional): True if a control experiment. Defaults to False.
+
+    Returns:
+        np.ndarray: vector of total times
+    """
 
     if not control:
         allt = np.cumsum([step.meastime() + step.movetime() for step in steps])
@@ -25,6 +37,15 @@ def get_steps_time(steps: List[ExperimentStep], control: bool = False) -> np.nda
     return allt
 
 def load_entropy(steps: List[ExperimentStep], control: bool = False) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Calculates the total and marginalized entropy associated with a list of steps
+
+    Args:
+        steps (List[ExperimentStep]): list of steps for calculation
+        control (bool, optional): True if a control experiment. Defaults to False.
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray, np.ndarray]: time, entropy, marginalized entropy vectors
+    """
 
     allt = get_steps_time(steps, control)
     allH = [step.dH for step in steps]
@@ -33,7 +54,15 @@ def load_entropy(steps: List[ExperimentStep], control: bool = False) -> Tuple[np
     return allt, allH, allH_marg
 
 def get_parameter_variance(steps: List[ExperimentStep], control: bool = False) -> Tuple[np.ndarray, np.ndarray]:
+    """Calculates the variance in each parameter at each of a list of steps
 
+    Args:
+        steps (List[ExperimentStep]): list of steps for calculation
+        control (bool, optional): True if a control experiment. Defaults to False.
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray]: time vector, array of parameter variances in time
+    """
     allt = get_steps_time(steps, control)
     allvars = np.array([np.var(step.draw.points, axis=0) for step in steps]).T
 
@@ -42,10 +71,25 @@ def get_parameter_variance(steps: List[ExperimentStep], control: bool = False) -
 def plot_qprofiles(Qth: np.ndarray,
                    qprofs: np.ndarray,
                    logps: np.ndarray,
-                   data=data_tuple,
+                   data: Union[data_tuple, None] = None,
                    ax: Union[Axis, None] = None,
                    exclude_from: int = 0,
                    power: int = 4) -> Tuple[Figure, Tuple[Axis, Axis, Axis]]:
+    """Plot data and distribution of profiles in Q
+
+    Args:
+        Qth (np.ndarray): Q vector, length Nq
+        qprofs (np.ndarray): Q profile array, size Np x Nq
+        logps (np.ndarray): array of log likelihood functions associated with each array, size Np
+        data (Union[data_tuple, None], optional): Tuple of data (see DataPoint). Defaults to None.
+        ax (Union[Axis, None], optional): axis on which to generate plot. Defaults to None; in this
+            case a new axis is created in the figure.
+        exclude_from (int, optional): exclude data before this index. Defaults to 0.
+        power (int, optional): Q scaling of profile (R x Q^power). Defaults to 4.
+
+    Returns:
+        Tuple[Figure, Tuple[Axis, Axis, Axis]]: figure, axis, axis=None, axis=None
+    """
     #Qs, Rs, dRs = problem.fitness.probe.Q[exclude_from:], problem.fitness.probe.R[exclude_from:], problem.fitness.probe.dR[exclude_from:]
     if ax is None:
         fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(10,8))
@@ -95,6 +139,20 @@ def parameter_error_plot(exp: SimReflExperiment,
                          tscale: str = 'log',
                          yscale: str = 'log',
                          color: Union[Color, None] = None) -> Tuple[Figure, List[Axis]]:
+    """Plot time course of all the errors (std dev) of the parameters in the simulated experiment
+
+    Args:
+        exp (SimReflExperiment): experiment simulation
+        ctrl (Union[SimReflExperimentControl, None], optional): control experiment. Defaults to None.
+        fig (Union[Figure, None], optional): figure. Defaults to None, in which case a new figure
+            is created and returned
+        tscale (str, optional): Time scaling, 'linear' or 'log'. Defaults to 'log'.
+        yscale (str, optional): Data scaling, 'linear' or 'log'. Defaults to 'log'.
+        color (Union[Color, None], optional): color. Defaults to None.
+
+    Returns:
+        Tuple[Figure, List[Axis]]: figure, list of axes (one for each parameter)
+    """
 
     import matplotlib.ticker
 
@@ -185,6 +243,20 @@ def snapshot(exp: SimReflExperiment,
              fig: Union[Figure, None] = None,
              power: int = 4,
              tscale: str = 'log') -> Tuple[Figure, Tuple[List[Axis], List[Axis], Axis, Axis]]:
+    """Plot snapshot of the simulation at a particular step number.
+
+    Args:
+        exp (SimReflExperiment): simulated experiment
+        stepnumber (int): index of step number to plot
+        fig (Union[Figure, None], optional): figure for the plot. Defaults to None, in which case a
+            new figure is created
+        power (int, optional): scaling of R(Q), i.e. R(Q) * Q^power. Defaults to 4.
+        tscale (str, optional): Time scaling, 'linear' or 'log'. Defaults to 'log'.
+
+    Returns:
+        Tuple[Figure, Tuple[List[Axis], List[Axis], Axis, Axis]]: figure, top axes, bottom axes,
+            entropy axis, marginalized entropy axis
+    """
 
     allt, allH, allH_marg = load_entropy(exp.steps[:-1])
 

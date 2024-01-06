@@ -1,3 +1,6 @@
+"""Tools for data simulation, binning, and analysis"""
+
+from typing import Tuple
 import numpy as np
 from bumps.fitters import DreamFit, _fill_defaults
 from scipy.stats import poisson
@@ -5,7 +8,18 @@ from reflred.candor import edges, _rebin_bank
 from reflred.refldata import ReflData, Sample, Detector, Monochromator
 import dataflow.lib.err1d as err1d
 
-def sim_data_N(R, incident_neutrons, addnoise=True, resid_bkg=0, meas_bkg=0):
+def sim_data_N(R, incident_neutrons, resid_bkg=0, meas_bkg=0) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Generate specular, background, and intensity counts from a Poisson distribution
+
+    Args:
+        R (list or ndarray): array of reflectivity values
+        incident_neutrons (list or ndarray): array of incident counts, same shape as R
+        resid_bkg (float, optional): Residual background (not accounted for by a model). Defaults to 0.
+        meas_bkg (int, optional): Actual measurement background. Defaults to 0.
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray, np.ndarray]: size R vectors of specular, background, and intensity
+    """
     R = np.array(R, ndmin=1)
     _bR = np.ones_like(R)*(meas_bkg - resid_bkg)*incident_neutrons
     _R = (R + meas_bkg - resid_bkg)*incident_neutrons
@@ -15,6 +29,23 @@ def sim_data_N(R, incident_neutrons, addnoise=True, resid_bkg=0, meas_bkg=0):
     return N, bN, incident_neutrons
 
 def calc_expected_R(fitness, T, dT, L, dL, oversampling=None, resolution='normal'):
+    """Calculates the reflectivity from a model for a given set of T, dT, L, dL
+
+    Args:
+        fitness (Union[refl1d.names.Experiment, refl1d.names.FitProblem]): Refl1D model
+        T (np.ndarray): incident angle (Theta) vector
+        dT (np.ndarray): angular resolution (dTheta) vector, same size as T
+        L (np.ndarray): wavelength (lambda) vector, same size as T
+        dL (np.ndarray): wavelength resolution (dlambda) vector, same size as T
+        oversampling (Union[int, None], optional): Integer number of oversampling points
+            to use for the calculation. Defaults to None (no oversampling).
+        resolution (str, optional): Resolution calculation, either 'uniform' or 'normal'. 'Uniform'
+            is used for instruments like CANDOR with many Q values contributing to each bin.
+             Defaults to 'normal'.
+
+    Returns:
+        np.ndarray: reflectivity calculation (same size as T)
+    """
     # currently requires sorted values (by Q) because it returns sorted values.
     # this will need to be modified for CANDOR.
     fitness.probe._set_TLR(T, dT, L, dL, R=None, dR=None, dQ=None)
@@ -25,6 +56,30 @@ def calc_expected_R(fitness, T, dT, L, dL, oversampling=None, resolution='normal
     return fitness.reflectivity()[1]
 
 def compile_data_N(Qbasis, T, dT, L, dL, Ntot, Nbkg, Ninc):
+    """Uses Reductus modules to reduce reflectivity data
+
+    Args:
+        Qbasis (np.ndarray): Q bin centers
+        T (np.ndarray): incident angle (Theta) vector
+        dT (np.ndarray): angular resolution (dTheta) vector, same size as T
+        L (np.ndarray): wavelength (lambda) vector, same size as T
+        dL (np.ndarray): wavelength resolution (dlambda) vector, same size as T
+        Ntot (np.ndarray): specular counts, same size as T
+        Nbkg (np.ndarray): background counts, same size as T
+        Ninc (np.ndarray): incident intensity counts, same size as T
+
+    Returns:
+        Tuple[
+            np.ndarray: _Ti, incident angle (Theta) vector of Qz bin centers
+            np.ndarray: _dT, angular resolution (dTheta) vector of Qz bin centers
+            np.ndarray: _L, wavelength (lambda) vector of Qz bin vectors
+            np.ndarray: _dL, wavelength resolution (dlambda) vector of Qz bin vectors
+            np.ndarray: reduced and binned reflectivity, (specular - background) / intensity
+            np.ndarray: error in reflectivity (standard deviation)
+            np.ndarray: qz, Qz values of reflectivity
+            np.ndarray: dq, Qz resolution
+        ]
+    """
     crit = np.round(Ninc)>0 # prevents zero-intensity data points
     T, dT, L, dL, Ntot, Nbkg, Ninc = [np.array(a)[crit] for a in (T, dT, L, dL, Ntot, Nbkg, Ninc)]
     if len(T):
@@ -74,10 +129,18 @@ def compile_data_N(Qbasis, T, dT, L, dL, Ntot, Nbkg, Ninc):
         return tuple([np.array([]) for _ in range(8)])
 
 class DreamFitPlus(DreamFit):
+    """Modified DreamFit object that allows specification of the initial population in the solve method
+    """
     def __init__(self, problem):
         super().__init__(problem)
 
     def solve(self, monitors=None, abort_test=None, mapper=None, initial_population=None, **options):
+        """Same as DreamFit.solve with one additional parameter:
+
+        Additional arg:
+            initial_population (Union[np.ndarray, None], optional): initial population to use. Same size
+                as results of bumps.fitters.initpop.generate Defaults to None.
+        """
         from bumps.dream import Dream
         from bumps.fitters import MonitorRunner, initpop
         if abort_test is None:
