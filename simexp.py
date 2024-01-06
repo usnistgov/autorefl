@@ -29,7 +29,7 @@ data_tuple = Tuple[Union[np.ndarray, list], Union[np.ndarray, list],
                                    Union[np.ndarray, list], Union[np.ndarray, list],
                                    Union[np.ndarray, list], Union[np.ndarray, list],
                                    Union[np.ndarray, list]]
-s
+
 _T = TypeVar("_T")
 
 class DataPoint(object):
