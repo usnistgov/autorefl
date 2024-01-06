@@ -1,3 +1,10 @@
+"""General module containing the simulated reflectivity experiment code. Important objects include:
+    DataPoint: container object for a single data point
+    ExperimentStep: container object for a single experiment step
+    SimReflExperiment: simulated experiment definition
+    SimReflExperimentControl: simulated experiment definition, control version
+"""
+
 import numpy as np
 import copy
 import time
@@ -22,7 +29,7 @@ data_tuple = Tuple[Union[np.ndarray, list], Union[np.ndarray, list],
                                    Union[np.ndarray, list], Union[np.ndarray, list],
                                    Union[np.ndarray, list], Union[np.ndarray, list],
                                    Union[np.ndarray, list]]
-
+s
 _T = TypeVar("_T")
 
 class DataPoint(object):
