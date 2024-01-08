@@ -3,12 +3,7 @@
 ## Installation
 To use these models, first install the molgroups package:
 ```
-pip install -e git+https://github.com/criosx/molgroups.git@440e542
-```
-
-Also install autorefl. From source:
-```
-python setup.py install
+pip install git+https://github.com/criosx/molgroups.git@440e542
 ```
 
 ## Running an autonomous experiment
