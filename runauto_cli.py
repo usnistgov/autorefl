@@ -87,9 +87,9 @@ import copy
 import os
 from bumps.cli import load_model
 import matplotlib.pyplot as plt
-from simexp import SimReflExperiment, SimReflExperimentControl
-from analysis import makemovie
-import instrument
+from autorefl.simexp import SimReflExperiment, SimReflExperimentControl
+from autorefl.analysis import makemovie
+import autorefl.instrument as instrument
 import argparse
 
 plt.rcParams['lines.linewidth'] = 1.5

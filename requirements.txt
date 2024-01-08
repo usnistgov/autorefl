@@ -1,0 +1,8 @@
+numpy
+scipy
+matplotlib
+reductus == 0.9.0
+bumps == 0.9.1
+refl1d == 0.8.15
+molgroups
+git+https://github.com/criosx/molgroups.git@440e542

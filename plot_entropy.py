@@ -43,8 +43,8 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker
 from matplotlib.lines import Line2D
 from bumps.plotutil import next_color
-from simexp import SimReflExperiment, SimReflExperimentControl
-from analysis import load_entropy
+from autorefl.simexp import SimReflExperiment, SimReflExperimentControl
+from autorefl.analysis import load_entropy
 import argparse
 
 plt.rcParams['lines.linewidth'] = 1.5
