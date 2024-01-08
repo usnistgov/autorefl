@@ -1,11 +1,9 @@
 ## === Import section ===
 
-import sys
-# append path to your molgroups, or just link molgroups to your same directory
-sys.path.append('')
 import numpy as np
-from molgroups_local import PC, ssBLM
-import components as cmp
+from molgroups.mol import ssBLM
+from molgroups.lipids import PC
+import molgroups.components as cmp
 from refl1d.names import load4, Parameter, SLD, Slab, Stack, Experiment, FitProblem
 from refl1d.flayer import FunctionalProfile
 
@@ -24,8 +22,11 @@ def bilayer(z, sigma, bulknsld, global_rough, rho_substrate, l_submembrane, l_li
     bulknsld *= 1e-6
     rho_substrate *= 1e-6
 
-    blm.fnSet(sigma, bulknsld, global_rough, rho_substrate, rho_siox, l_siox, l_submembrane, l_lipid1, l_lipid2, vf_bilayer)
-    
+    blm.fnSet(sigma=sigma, bulknsld=bulknsld, global_rough=global_rough,
+              rho_substrate=rho_substrate, rho_siox=rho_siox, l_siox=l_siox,
+              l_submembrane=l_submembrane, l_lipid1=l_lipid1, l_lipid2=l_lipid2,
+              vf_bilayer=vf_bilayer)
+        
     # Calculate scattering properties of volume occupied by bilayer
     normarea, area, nsl = blm.fnWriteProfile(z)
 
@@ -68,7 +69,7 @@ silicon = SLD(name='silicon', rho=2.0690, irho=0.0000)
 
 layer_d2o = Slab(material=d2o, thickness=0.0000, interface=5.0000)
 layer_h2o = Slab(material=h2o, thickness=0.0000, interface=5.0000)
-layer_tiox = Slab(material=tiox, thickness=l_tiox - (blm.substrate.z + 0.5 * blm.substrate.l), interface=0.0)
+layer_tiox = Slab(material=tiox, thickness=l_tiox - (blm.substrate.z + 0.5 * blm.substrate.length), interface=0.0)
 layer_siox = Slab(material=siox, thickness=7.5804, interface=10.000)
 layer_silicon = Slab(material=silicon, thickness=0.0000, interface=0.0000)
 
