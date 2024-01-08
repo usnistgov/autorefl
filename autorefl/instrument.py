@@ -1,10 +1,13 @@
 """Reflectometry instrument definitions"""
 
+from pathlib import Path
 import numpy as np
 import json
 import warnings
 from reflred.candor import edges
 from reflred.resolution import divergence
+
+CALIBRATION_PATH = Path(__file__).parent / 'calibration'
 
 def q2a(q, L):
     return np.degrees(np.arcsin(np.array(q)*L/(4*np.pi)))
@@ -215,7 +218,7 @@ class MAGIK(ReflectometerBase):
 
         # load calibration files
         try:
-            d_intens = np.loadtxt('calibration/magik_intensity_hw106.refl')
+            d_intens = np.loadtxt(CALIBRATION_PATH / 'magik_intensity_hw106.refl')
 
             self.p_intens = np.polyfit(d_intens[:,0], d_intens[:,1], 3, w=1/d_intens[:,2])
         except OSError:
@@ -290,12 +293,12 @@ class CANDOR(ReflectometerBase):
         self._Qpow = 3.0
 
         # load wavelength calibration
-        wvcal = np.flipud(np.loadtxt(f'calibration/DetectorWavelengths_PG_integrate_sumeff_bank{bank}.csv', delimiter=',', usecols=[1, 2]))
+        wvcal = np.flipud(np.loadtxt(CALIBRATION_PATH / f'DetectorWavelengths_PG_integrate_sumeff_bank{bank}.csv', delimiter=',', usecols=[1, 2]))
         self._L = wvcal[:,0]
         self._dL = wvcal[:,1]
 
         # load intensity calibration (same used for both banks for simulation purposes)
-        with open('calibration/flowcell_d2o_r12_2_5_maxbeam_60_qoverlap0_751388_unpolarized_intensity.json', 'r') as f:
+        with open(CALIBRATION_PATH / 'flowcell_d2o_r12_2_5_maxbeam_60_qoverlap0_751388_unpolarized_intensity.json', 'r') as f:
             d = json.load(f)
         
         self.intens_calib = np.squeeze(np.array(d['outputs'][0]['v']))
