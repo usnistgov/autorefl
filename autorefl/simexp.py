@@ -19,9 +19,9 @@ from refl1d.names import FitProblem, Experiment
 from refl1d.resolution import TL2Q
 from scipy.interpolate import interp1d
 
-from entropy import calc_entropy, calc_init_entropy, default_entropy_options
-import datatools as ar
-import instrument
+from .entropy import calc_entropy, calc_init_entropy, default_entropy_options
+import autorefl.datatools as ar
+import autorefl.instrument as instrument
 
 fit_options = {'pop': 10, 'burn': 1000, 'steps': 500, 'init': 'lhs', 'alpha': 0.001}
 
