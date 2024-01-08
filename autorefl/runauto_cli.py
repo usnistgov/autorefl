@@ -1,7 +1,7 @@
 """ Command line interface for running simulated reflectometry measurements
 
 Example:
-python runauto_cli.py ssblm.py --pars ssblm_tosb0.par --name both_forecast_q025
+python -m autorefl.runauto_cli ssblm.py --pars ssblm_tosb0.par --name both_forecast_q025
     --sel 10 11 12 13 14 --eta 0.50 --meas_bkg 3e-6 3e-5 --maxtime 43.2e3 --burn 1000 --steps 500
     --pop 8 --instrument MAGIK --qmax 0.25 --qstep_max 0.0024
 
@@ -9,7 +9,7 @@ Required arguments:
 
 model -- a Refl1D model script (.py)
 
-Optionsl arguments:
+Optional arguments:
 
 --pars -- a file containing a parameter file (e.g. a Refl1D .par output file) containing ground
             truth values for each parameter
@@ -87,8 +87,8 @@ import copy
 import os
 from bumps.cli import load_model
 import matplotlib.pyplot as plt
-from autorefl.simexp import SimReflExperiment, SimReflExperimentControl
-from autorefl.analysis import makemovie
+from .simexp import SimReflExperiment, SimReflExperimentControl
+from .analysis import makemovie
 import autorefl.instrument as instrument
 import argparse
 
