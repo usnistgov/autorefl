@@ -7,23 +7,25 @@ Framework for driving neutron autonomous reflectometry experiments. The overarch
 
 Neutron reflectometry measurements involve measuring the reflection of neutrons from structured interfaces. Measurements involve measuring a 1-D curve, $R(Q)$. For a general reflectometer, the 1-D measurement coordinate is a general coordinate $x$ with a transformation from $x$ &rarr; $Q$ (sometimes multiple $Q$ values per $x$).
 
-## Installation
+## Installation (via conda and `setup.py`)
 ```
+conda env create -n autorefl --file=environment.yml
+conda activate autorefl
 python setup.py install
 ```
 
 ## List of important modules
-simexp -- library containing SimReflExperiment, SimReflExperimentControl, and data structures
+`simexp` -- library containing SimReflExperiment, SimReflExperimentControl, and data structures
 
-instrument -- instrument definitions for monochromatic and polychromatic reflectometers
+`instrument` -- instrument definitions for monochromatic and polychromatic reflectometers
 
-entropy -- library of functions for calculating entropies
+`entropy` -- library of functions for calculating entropies
 
-datatools -- library of helper functions for simulating and fitting data
+`datatools` -- library of helper functions for simulating and fitting data
 
-runauto_cli -- command line interface for running simulations with an arbitrary model and simulation parameters
+`runauto_cli` -- command line interface for running simulations with an arbitrary model and simulation parameters
 
-## Example usage of command line interface
+## Running example models
 Autonomous experiment:
 
 ```
