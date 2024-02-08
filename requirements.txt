@@ -1,6 +1,4 @@
-numpy
-scipy
-matplotlib
-reductus == 0.9.0
+molgroups @ git+https://github.com/criosx/molgroups@440e542f77522126b693ff1441df8cfe46d80d7d
+reductus @ git+https://github.com/reductus/reductus.git@v0.9.1
 bumps == 0.9.1
 refl1d == 0.8.15

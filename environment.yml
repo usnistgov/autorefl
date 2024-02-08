@@ -1,0 +1,17 @@
+# environment.yml
+
+name: autotest
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10
+  - numpy
+  - scipy
+  - matplotlib
+  - mdanalysis
+  - pip
+  - pip:
+    - bumps == 0.9.1
+    - refl1d == 0.8.15
+    - reductus @ git+https://github.com/reductus/reductus.git@v0.9.1
+    - molgroups @ git+https://github.com/criosx/molgroups@440e542f77522126b693ff1441df8cfe46d80d7d
